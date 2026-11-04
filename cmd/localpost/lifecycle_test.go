@@ -97,14 +97,14 @@ func lifecycleWait(t *testing.T, predicate func() bool) {
 	}
 }
 
-func lifecycleUpload(t *testing.T, mailbox registration, directory string) (net.Conn, *bufio.Reader) {
+func lifecycleUpload(t *testing.T, url string, mailbox registration, directory string) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	return lifecycleUploadLength(t, mailbox, directory, 6)
+	return lifecycleUploadLength(t, url, mailbox, directory, 6)
 }
 
-func lifecycleUploadLength(t *testing.T, mailbox registration, directory string, length int) (net.Conn, *bufio.Reader) {
+func lifecycleUploadLength(t *testing.T, url string, mailbox registration, directory string, length int) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", mailbox.Port), time.Second)
+	conn, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +112,7 @@ func lifecycleUploadLength(t *testing.T, mailbox registration, directory string,
 	if err := conn.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fmt.Fprintf(conn, "POST /messages HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\nabc", length); err != nil {
+	if _, err := fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: %d\r\n\r\nabc", messagePath(mailbox.ID), length); err != nil {
 		t.Fatal(err)
 	}
 	assertDirectoryEntries(t, directory, 1)
@@ -137,19 +137,17 @@ func lifecycleCheckDelete(t *testing.T, reply lifecycleReply, id string, forced 
 	}
 }
 
-func lifecycleAssertReleased(t *testing.T, mailbox registration) {
+func lifecycleAssertReleased(t *testing.T, r *registry, mailbox registration) {
 	t.Helper()
-	listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", mailbox.Port))
-	if err != nil {
-		t.Fatalf("mailbox port retained: %v", err)
-	}
-	if err := listener.Close(); err != nil {
-		t.Fatal(err)
+	if lifecycleMailbox(r, mailbox.ID) != nil {
+		t.Fatal("finished registration retained mapping")
 	}
 }
 
+func messagePath(id string) string { return "/registrations/" + id + "/messages" }
+
 func TestLifecycleUnregisterPreservesFilesAndSibling(t *testing.T) {
-	_, url, _, _ := lifecycleServer(t, time.Second)
+	r, url, _, _ := lifecycleServer(t, time.Second)
 	client := lifecycleClient(t)
 	directory := t.TempDir()
 	first := lifecycleRegister(t, client, url, directory)
@@ -159,12 +157,12 @@ func TestLifecycleUnregisterPreservesFilesAndSibling(t *testing.T) {
 		t.Fatal(err)
 	}
 	lifecycleCheckDelete(t, lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+first.ID), first.ID, false)
-	lifecycleAssertReleased(t, first)
+	lifecycleAssertReleased(t, r, first)
 	data, err := os.ReadFile(path)
 	if err != nil || string(data) != "retained" {
 		t.Fatalf("existing file changed: %q %v", data, err)
 	}
-	response, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/messages", sibling.Port), "application/octet-stream", strings.NewReader("still usable"))
+	response, err := client.Post(url+messagePath(sibling.ID), "application/octet-stream", strings.NewReader("still usable"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +178,7 @@ func TestLifecycleUnregisterPreservesFilesAndSibling(t *testing.T) {
 		code       string
 	}{
 		{http.MethodDelete, first.ID, 404, "registration_not_found"},
-		{http.MethodDelete, "unknown", 404, "registration_not_found"},
+		{http.MethodDelete, "12345678-1234-4234-8234-123456789abc", 404, "registration_not_found"},
 		{http.MethodGet, sibling.ID, 405, "method_not_allowed"},
 		{http.MethodPost, sibling.ID, 405, "method_not_allowed"},
 	} {
@@ -197,9 +195,9 @@ func TestLifecycleAcceptedUploadDrainsAndRejectsNewWork(t *testing.T) {
 	directory := t.TempDir()
 	registered := lifecycleRegister(t, client, url, directory)
 	mailbox := lifecycleMailbox(r, registered.ID)
-	conn, reader := lifecycleUpload(t, registered, directory)
+	conn, reader := lifecycleUpload(t, url, registered, directory)
 	// A partial header keeps an accepted connection alive across the closing gate.
-	waiting, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", registered.Port), time.Second)
+	waiting, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,12 +219,16 @@ func TestLifecycleAcceptedUploadDrainsAndRejectsNewWork(t *testing.T) {
 	if err := prior.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.WriteString(waiting, "POST /messages HTTP/1.1\r\n"); err != nil {
+	if _, err := io.WriteString(waiting, "POST "+messagePath(registered.ID)+" HTTP/1.1\r\n"); err != nil {
 		t.Fatal(err)
 	}
 	deleted := make(chan lifecycleReply, 1)
 	go func() { deleted <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered.ID) }()
 	lifecycleWait(t, func() bool { mailbox.mu.Lock(); defer mailbox.mu.Unlock(); return mailbox.closing })
+	rejected := lifecycleRequest(client, http.MethodPost, url+messagePath(registered.ID))
+	if rejected.err != nil || rejected.status != http.StatusServiceUnavailable || !bytes.Contains(rejected.body, []byte(`"code":"unavailable"`)) {
+		t.Fatalf("closing route = %+v", rejected)
+	}
 	select {
 	case result := <-deleted:
 		t.Fatalf("DELETE returned before admitted body completed: %+v", result)
@@ -265,7 +267,7 @@ func TestLifecycleAcceptedUploadDrainsAndRejectsNewWork(t *testing.T) {
 	if err != nil || string(data) != "abcdef" {
 		t.Fatalf("drained file = %q %v", data, err)
 	}
-	lifecycleAssertReleased(t, registered)
+	lifecycleAssertReleased(t, r, registered)
 }
 
 func TestLifecycleForcedDeadlineDoesNotExtendWithProgress(t *testing.T) {
@@ -274,7 +276,7 @@ func TestLifecycleForcedDeadlineDoesNotExtendWithProgress(t *testing.T) {
 	directory := t.TempDir()
 	registered := lifecycleRegister(t, client, url, directory)
 	mailbox := lifecycleMailbox(r, registered.ID)
-	conn, _ := lifecycleUploadLength(t, registered, directory, 65536)
+	conn, _ := lifecycleUploadLength(t, url, registered, directory, 65536)
 	deleted := make(chan lifecycleReply, 1)
 	start := time.Now()
 	go func() { deleted <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered.ID) }()
@@ -307,7 +309,7 @@ waitForForcedStop:
 	// Completing the body after the reported cutoff cannot publish a late file.
 	_, _ = io.WriteString(conn, "z")
 	assertDirectoryEntries(t, directory, 0)
-	lifecycleAssertReleased(t, registered)
+	lifecycleAssertReleased(t, r, registered)
 }
 
 func TestLifecycleConcurrentDeleteCoalesces(t *testing.T) {
@@ -316,7 +318,7 @@ func TestLifecycleConcurrentDeleteCoalesces(t *testing.T) {
 	directory := t.TempDir()
 	registered := lifecycleRegister(t, client, url, directory)
 	mailbox := lifecycleMailbox(r, registered.ID)
-	_, _ = lifecycleUpload(t, registered, directory)
+	_, _ = lifecycleUpload(t, url, registered, directory)
 	replies := make(chan lifecycleReply, 8)
 	for range cap(replies) {
 		go func() { replies <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered.ID) }()
@@ -326,7 +328,7 @@ func TestLifecycleConcurrentDeleteCoalesces(t *testing.T) {
 		lifecycleCheckDelete(t, <-replies, registered.ID, true)
 	}
 	assertDirectoryEntries(t, directory, 0)
-	lifecycleAssertReleased(t, registered)
+	lifecycleAssertReleased(t, r, registered)
 }
 
 func TestLifecycleProcessCancellationDrainsAcceptedUpload(t *testing.T) {
@@ -335,7 +337,7 @@ func TestLifecycleProcessCancellationDrainsAcceptedUpload(t *testing.T) {
 	directory := t.TempDir()
 	registered := lifecycleRegister(t, client, url, directory)
 	mailbox := lifecycleMailbox(r, registered.ID)
-	conn, reader := lifecycleUpload(t, registered, directory)
+	conn, reader := lifecycleUpload(t, url, registered, directory)
 	cancel()
 	lifecycleWait(t, func() bool { mailbox.mu.Lock(); defer mailbox.mu.Unlock(); return mailbox.closing })
 	if _, err := io.WriteString(conn, "def"); err != nil {
@@ -360,7 +362,7 @@ func TestLifecycleProcessCancellationDrainsAcceptedUpload(t *testing.T) {
 		t.Fatal("process shutdown did not finish")
 	}
 	assertDirectoryEntries(t, directory, 1)
-	lifecycleAssertReleased(t, registered)
+	lifecycleAssertReleased(t, r, registered)
 }
 
 func TestLifecycleProcessCancellationUsesSharedBudget(t *testing.T) {
@@ -371,7 +373,7 @@ func TestLifecycleProcessCancellationUsesSharedBudget(t *testing.T) {
 	for range 5 {
 		directory := t.TempDir()
 		mailbox := lifecycleRegister(t, client, url, directory)
-		_, _ = lifecycleUpload(t, mailbox, directory)
+		_, _ = lifecycleUpload(t, url, mailbox, directory)
 		registered = append(registered, mailbox)
 		directories = append(directories, directory)
 	}
@@ -389,7 +391,7 @@ func TestLifecycleProcessCancellationUsesSharedBudget(t *testing.T) {
 		t.Fatalf("shared shutdown budget exceeded: %v", elapsed)
 	}
 	for i, mailbox := range registered {
-		lifecycleAssertReleased(t, mailbox)
+		lifecycleAssertReleased(t, r, mailbox)
 		assertDirectoryEntries(t, directories[i], 0)
 	}
 	response, _ := registrationRequest(t, r, t.TempDir())
@@ -404,7 +406,7 @@ func TestLifecycleDeleteContinuesAfterCallerDisconnect(t *testing.T) {
 	directory := t.TempDir()
 	registered := lifecycleRegister(t, client, url, directory)
 	mailbox := lifecycleMailbox(r, registered.ID)
-	conn, reader := lifecycleUpload(t, registered, directory)
+	conn, reader := lifecycleUpload(t, url, registered, directory)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, url+"/registrations/"+registered.ID, nil)
@@ -454,5 +456,71 @@ func TestLifecycleDeleteContinuesAfterCallerDisconnect(t *testing.T) {
 		t.Fatal("disconnected DELETE retained registration")
 	}
 	assertDirectoryEntries(t, directory, 1)
-	lifecycleAssertReleased(t, registered)
+	lifecycleAssertReleased(t, r, registered)
+}
+
+func TestLifecycleForcedDeleteDoesNotAbortReusedSiblingConnection(t *testing.T) {
+	r, url, _, _ := lifecycleServer(t, 100*time.Millisecond)
+	client := lifecycleClient(t)
+	firstDirectory, siblingDirectory := t.TempDir(), t.TempDir()
+	first := lifecycleRegister(t, client, url, firstDirectory)
+	sibling := lifecycleRegister(t, client, url, siblingDirectory)
+	firstOwner, siblingOwner := lifecycleMailbox(r, first.ID), lifecycleMailbox(r, sibling.ID)
+	shared, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = shared.Close() })
+	if err := shared.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(shared)
+	if _, err := fmt.Fprintf(shared, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 1\r\n\r\nx", messagePath(first.ID)); err != nil {
+		t.Fatal(err)
+	}
+	resourceReadResponse(t, reader, http.StatusOK)
+	lifecycleWait(t, func() bool { firstOwner.mu.Lock(); defer firstOwner.mu.Unlock(); return firstOwner.active == 0 })
+	// Reuse the completed A connection for an admitted but unfinished B upload.
+	if _, err := fmt.Fprintf(shared, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 6\r\n\r\nabc", messagePath(sibling.ID)); err != nil {
+		t.Fatal(err)
+	}
+	lifecycleWait(t, func() bool { siblingOwner.mu.Lock(); defer siblingOwner.mu.Unlock(); return siblingOwner.active == 1 })
+	held, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	if err := held.SetDeadline(time.Now().Add(4 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fmt.Fprintf(held, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 6\r\n\r\nabc", messagePath(first.ID)); err != nil {
+		t.Fatal(err)
+	}
+	lifecycleWait(t, func() bool { firstOwner.mu.Lock(); defer firstOwner.mu.Unlock(); return firstOwner.active == 1 })
+	// Forced A cleanup must target its current request, never its former TCP
+	// connection now owned by B. The DELETE response proves force completed.
+	lifecycleCheckDelete(t, lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+first.ID), first.ID, true)
+	if _, err := io.WriteString(shared, "def"); err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(reader, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var receipt messageReceipt
+	decodeErr := json.NewDecoder(response.Body).Decode(&receipt)
+	closeErr := response.Body.Close()
+	if decodeErr != nil || closeErr != nil || response.StatusCode != http.StatusOK || response.Close || receipt.Bytes != 6 {
+		t.Fatalf("sibling completion = %d %+v %v %v", response.StatusCode, receipt, decodeErr, closeErr)
+	}
+	payload, err := os.ReadFile(filepath.Join(siblingDirectory, receipt.Filename))
+	if err != nil || string(payload) != "abcdef" {
+		t.Fatalf("sibling payload = %q %v", payload, err)
+	}
+	assertDirectoryEntries(t, firstDirectory, 1)
+	assertDirectoryEntries(t, siblingDirectory, 1)
+	lifecycleWait(t, func() bool { return len(r.uploads.held) == 0 })
+	if lifecycleMailbox(r, first.ID) != nil || lifecycleMailbox(r, sibling.ID) != siblingOwner {
+		t.Fatal("forced deletion changed sibling ownership")
+	}
 }

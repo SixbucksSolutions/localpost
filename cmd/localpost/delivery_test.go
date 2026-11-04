@@ -282,8 +282,7 @@ func TestMessageProgressExtendsDeadline(t *testing.T) {
 }
 
 func TestRegisteredMailboxDeliversSeparately(t *testing.T) {
-	registry := newRegistry()
-	defer registry.close()
+	registry, url, _, _ := lifecycleServer(t, time.Second)
 	for range 2 {
 		directory := t.TempDir()
 		mailbox, err := registry.register(directory)
@@ -291,7 +290,7 @@ func TestRegisteredMailboxDeliversSeparately(t *testing.T) {
 			t.Fatal(err)
 		}
 		client := &http.Client{Timeout: 3 * time.Second}
-		response, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/messages", mailbox.Port), "application/octet-stream", strings.NewReader(directory))
+		response, err := client.Post(url+messagePath(mailbox.ID), "application/octet-stream", strings.NewReader(directory))
 		if err != nil {
 			t.Fatal(err)
 		}

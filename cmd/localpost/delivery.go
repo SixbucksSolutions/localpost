@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -61,14 +62,26 @@ func newMessageHandler(directory string) *messageHandler {
 func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	controller := http.NewResponseController(w)
 	if h.mailbox != nil {
-		if !h.mailbox.admit() {
+		ctx, cancel := context.WithCancel(request.Context())
+		defer cancel()
+		request = request.WithContext(ctx)
+		active := &activeRequest{abort: func() {
+			cancel()
+			// Do not close the shared listener or another registration's connections.
+			_ = controller.SetReadDeadline(time.Now())
+		}}
+		if !h.mailbox.admitRequest(active) {
 			abortMessageBody(w, controller)
 			writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "mailbox is stopping")
 			return
 		}
-		defer h.mailbox.finished()
+		defer h.mailbox.finishedRequest(active)
 	}
-	if request.URL.Path != "/messages" {
+	path := "/messages"
+	if h.mailbox != nil {
+		path = "/registrations/" + h.mailbox.ID + "/messages"
+	}
+	if request.URL.Path != path {
 		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusNotFound, "not_found", "404 page not found")
 		return
@@ -98,7 +111,7 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 		}
 		defer h.uploads.release()
 	}
-	if err := controller.SetReadDeadline(time.Now().Add(h.idleTimeout)); err != nil {
+	if err := h.setReadDeadline(controller, time.Now().Add(h.idleTimeout)); err != nil {
 		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusInternalServerError, "delivery_failed", "unable to enforce message read timeout")
 		return
@@ -113,7 +126,9 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 	// Cleanup is best effort. A published message remains successful even if the
 	// temporary hard link cannot be removed; it must not invite a duplicate retry.
 	defer func() { _ = h.storage.remove(file.Name()) }()
-	size, readErr := copyMessage(file, http.MaxBytesReader(w, request.Body, messageBodyLimit), controller, h.idleTimeout)
+	size, readErr := copyMessageWithDeadline(file, http.MaxBytesReader(w, request.Body, messageBodyLimit), func(deadline time.Time) error {
+		return h.setReadDeadline(controller, deadline)
+	}, h.idleTimeout)
 	closeErr := file.Close()
 	if readErr != nil {
 		abortMessageBody(w, controller)
@@ -133,8 +148,9 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 	}
 	// Only a fully consumed body is safe for keep-alive reuse. Rejected bodies
 	// retain an expired deadline so net/http's final body drain cannot stall.
-	_ = controller.SetReadDeadline(time.Time{})
+	_ = h.setReadDeadline(controller, time.Time{})
 	if closeErr != nil || request.Context().Err() != nil {
+		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusInternalServerError, "delivery_failed", "unable to complete message file")
 		return
 	}
@@ -142,12 +158,27 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 	// Linking a closed, complete file publishes atomically and never replaces an
 	// existing destination. Unsupported filesystems fail rather than weakening it.
 	if err := h.publish(file.Name(), filename); err != nil {
+		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusInternalServerError, "delivery_failed", "unable to publish message file")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	// Losing the response cannot undo a successfully published message.
 	_ = json.NewEncoder(w).Encode(messageReceipt{Filename: filename, Bytes: size})
+}
+
+// Serialize deadline refreshes with force so upload progress cannot undo the
+// forced cutoff. The controller overrides the server's total read timeout for
+// upload routes, preserving the per-progress idle deadline.
+func (h *messageHandler) setReadDeadline(controller *http.ResponseController, deadline time.Time) error {
+	if h.mailbox != nil {
+		h.mailbox.mu.Lock()
+		defer h.mailbox.mu.Unlock()
+		if h.mailbox.forced {
+			return context.Canceled
+		}
+	}
+	return controller.SetReadDeadline(deadline)
 }
 
 func (h *messageHandler) publish(temporary, filename string) error {
@@ -171,6 +202,10 @@ func abortMessageBody(w http.ResponseWriter, controller *http.ResponseController
 }
 
 func copyMessage(destination io.Writer, source io.Reader, controller *http.ResponseController, idleTimeout time.Duration) (int64, error) {
+	return copyMessageWithDeadline(destination, source, controller.SetReadDeadline, idleTimeout)
+}
+
+func copyMessageWithDeadline(destination io.Writer, source io.Reader, setDeadline func(time.Time) error, idleTimeout time.Duration) (int64, error) {
 	var total int64
 	buffer := make([]byte, 32<<10)
 	for {
@@ -185,7 +220,7 @@ func copyMessage(destination io.Writer, source io.Reader, controller *http.Respo
 				return total, errors.Join(errMessageStorage, io.ErrShortWrite)
 			}
 			// Progress extends the idle deadline, never an empty read.
-			if err := controller.SetReadDeadline(time.Now().Add(idleTimeout)); err != nil {
+			if err := setDeadline(time.Now().Add(idleTimeout)); err != nil {
 				return total, errors.Join(errMessageStorage, err)
 			}
 		}

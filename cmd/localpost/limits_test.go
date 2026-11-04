@@ -45,15 +45,16 @@ func TestResourceRegistrationConcurrentBoundary(t *testing.T) {
 	}
 }
 
-func TestResourceRegistrationFailedAllocationReusesCapacity(t *testing.T) {
+func TestResourceRegistrationFailedValidationReusesCapacity(t *testing.T) {
 	r := newRegistry()
 	r.registrationLimit = 1
 	defer r.close()
-	r.listen = func(string, string) (net.Listener, error) { return nil, errors.New("test allocation failure") }
-	if _, err := r.register(t.TempDir()); err == nil {
-		t.Fatal("allocation unexpectedly succeeded")
+
+	response, _ := registrationRequest(t, r, filepath.Join(t.TempDir(), "missing"))
+	if response.Code != http.StatusBadRequest {
+		t.Fatal("invalid directory unexpectedly succeeded")
 	}
-	r.listen = net.Listen
+
 	if _, err := r.register(t.TempDir()); err != nil {
 		t.Fatalf("failed allocation consumed capacity: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestResourceRegistrationClosingRetainsCapacity(t *testing.T) {
 	directory := t.TempDir()
 	registered := lifecycleRegister(t, client, url, directory)
 	mailbox := lifecycleMailbox(r, registered.ID)
-	conn, reader := lifecycleUpload(t, registered, directory)
+	conn, reader := lifecycleUpload(t, url, registered, directory)
 	deleted := make(chan lifecycleReply, 1)
 	go func() { deleted <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered.ID) }()
 	lifecycleWait(t, func() bool { mailbox.mu.Lock(); defer mailbox.mu.Unlock(); return mailbox.closing })
@@ -98,9 +99,9 @@ func resourceReadResponse(t *testing.T, reader *bufio.Reader, status int) {
 	}
 }
 
-func resourcePost(t *testing.T, client *http.Client, port int, status int) {
+func resourcePost(t *testing.T, client *http.Client, url string, mailbox registration, status int) {
 	t.Helper()
-	response, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/messages", port), "application/json", strings.NewReader("payload"))
+	response, err := client.Post(url+messagePath(mailbox.ID), "application/json", strings.NewReader("payload"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,9 +126,9 @@ func TestResourceUploadGlobalSaturationAndCancellation(t *testing.T) {
 	first := lifecycleRegister(t, client, url, directory)
 	siblingDir := t.TempDir()
 	sibling := lifecycleRegister(t, client, url, siblingDir)
-	conn, _ := lifecycleUpload(t, first, directory)
+	conn, _ := lifecycleUpload(t, url, first, directory)
 	// An incomplete rejected body must receive a response without sending its tail.
-	rejected, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", sibling.Port), time.Second)
+	rejected, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +136,7 @@ func TestResourceUploadGlobalSaturationAndCancellation(t *testing.T) {
 	if err := rejected.SetDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.WriteString(rejected, "POST /messages HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\nx"); err != nil {
+	if _, err := io.WriteString(rejected, "POST "+messagePath(sibling.ID)+" HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\nx"); err != nil {
 		t.Fatal(err)
 	}
 	response, err := http.ReadResponse(bufio.NewReader(rejected), nil)
@@ -148,14 +149,14 @@ func TestResourceUploadGlobalSaturationAndCancellation(t *testing.T) {
 		t.Fatalf("saturation = %d %s %v", response.StatusCode, data, err)
 	}
 	assertDirectoryEntries(t, siblingDir, 0)
-	resourcePost(t, client, sibling.Port, 503)
+	resourcePost(t, client, url, sibling, 503)
 	if err := conn.Close(); err != nil {
 		t.Fatal(err)
 	}
 	lifecycleWait(t, func() bool { return len(r.uploads.held) == 0 })
 	assertDirectoryEntries(t, directory, 0)
-	resourcePost(t, client, sibling.Port, 200)
-	resourcePost(t, client, first.Port, 200)
+	resourcePost(t, client, url, sibling, 200)
+	resourcePost(t, client, url, first, 200)
 	lifecycleWait(t, func() bool { return len(r.uploads.held) == 0 })
 }
 
@@ -220,7 +221,7 @@ func TestResourceUploadForcedDrainAndShutdownRelease(t *testing.T) {
 			directory := t.TempDir()
 			first := lifecycleRegister(t, client, url, directory)
 			sibling := lifecycleRegister(t, client, url, t.TempDir())
-			_, _ = lifecycleUpload(t, first, directory)
+			_, _ = lifecycleUpload(t, url, first, directory)
 			if shutdown {
 				cancel()
 				select {
@@ -236,7 +237,7 @@ func TestResourceUploadForcedDrainAndShutdownRelease(t *testing.T) {
 				}
 			} else {
 				lifecycleCheckDelete(t, lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+first.ID), first.ID, true)
-				resourcePost(t, client, sibling.Port, 200)
+				resourcePost(t, client, url, sibling, 200)
 			}
 			lifecycleWait(t, func() bool { return len(r.uploads.held) == 0 })
 			assertDirectoryEntries(t, directory, 0)
@@ -281,7 +282,7 @@ func TestResourceUploadGracefulShutdownRelease(t *testing.T) {
 	client := lifecycleClient(t)
 	directory := t.TempDir()
 	first := lifecycleRegister(t, client, url, directory)
-	conn, reader := lifecycleUpload(t, first, directory)
+	conn, reader := lifecycleUpload(t, url, first, directory)
 	done := make(chan struct{})
 	go func() { r.shutdown(context.Background()); close(done) }()
 	mailbox := lifecycleMailbox(r, first.ID)
@@ -304,128 +305,16 @@ func TestResourceUploadGracefulShutdownRelease(t *testing.T) {
 	assertDirectoryEntries(t, directory, 1)
 }
 
-func TestResourceUnexpectedListenerFailureReleasesCapacity(t *testing.T) {
-	r, url, _, _ := lifecycleServer(t, time.Second)
-	r.registrationLimit = 1
-	r.uploads = newUploadSlots(1)
-	client := lifecycleClient(t)
-	directory := t.TempDir()
-	registered := lifecycleRegister(t, client, url, directory)
-	mailbox := lifecycleMailbox(r, registered.ID)
-	_, _ = lifecycleUpload(t, registered, directory)
-	if err := mailbox.listener.Close(); err != nil {
-		t.Fatal(err)
-	}
-	select {
-	case <-mailbox.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("failed listener did not finish cleanup")
-	}
-	if len(r.uploads.held) != 0 || registrationCount(r) != 0 {
-		t.Fatal("listener failure retained capacity")
-	}
-	assertDirectoryEntries(t, directory, 0)
-	replacement := lifecycleRegister(t, client, url, t.TempDir())
-	resourcePost(t, client, replacement.Port, 200)
-}
-
-// delayedCloseListener keeps Serve's listener tracked after Close. A premature
-// external Close would make Shutdown observe the second Close's net.ErrClosed.
-type delayedCloseListener struct {
-	net.Listener
-	accepting     chan struct{}
-	firstClose    chan struct{}
-	secondClose   chan struct{}
-	releaseAccept chan struct{}
-	closeMu       sync.Mutex
-	closeCount    int
-}
-
-func (l *delayedCloseListener) Accept() (net.Conn, error) {
-	close(l.accepting)
-	conn, err := l.Listener.Accept()
-	if err != nil {
-		<-l.releaseAccept
-	}
-	return conn, err
-}
-
-func (l *delayedCloseListener) Close() error {
-	l.closeMu.Lock()
-	defer l.closeMu.Unlock()
-	l.closeCount++
-	if l.closeCount == 1 {
-		err := l.Listener.Close()
-		close(l.firstClose)
-		return err
-	}
-	if l.closeCount == 2 {
-		close(l.secondClose)
-	}
-	return net.ErrClosed
-}
-
-func TestResourceGracefulDrainOwnsListenerClose(t *testing.T) {
-	listener := &delayedCloseListener{
-		Listener: newTestListener(t), accepting: make(chan struct{}),
-		firstClose: make(chan struct{}), secondClose: make(chan struct{}), releaseAccept: make(chan struct{}),
-	}
+func TestResourceDrainBeforeUploadReleasesCapacity(t *testing.T) {
 	r := newRegistry()
 	defer r.close()
-	r.listen = func(string, string) (net.Listener, error) { return listener, nil }
 	mailbox, err := r.register(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
-	<-listener.accepting
 	result := httptest.NewRecorder()
-	done := make(chan struct{})
-	go func() { r.unregister(result, mailbox.ID); close(done) }()
-	<-listener.firstClose
-	// With the old close-before-Shutdown sequence, the second Close arrives
-	// while Accept remains held here, deterministically retaining the error.
-	select {
-	case <-listener.secondClose:
-	case <-time.After(30 * time.Millisecond):
-	}
-	close(listener.releaseAccept)
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("drain did not finish")
-	}
-	if result.Code != 200 || !strings.Contains(result.Body.String(), `"forced":false`) {
-		t.Fatalf("graceful listener close reported forced: %d %s", result.Code, result.Body.String())
-	}
-	if registrationCount(r) != 0 {
-		t.Fatal("graceful drain retained registration capacity")
-	}
-}
-
-func TestResourceDrainBeforeServeReleasesListener(t *testing.T) {
-	r := newRegistry()
-	defer r.close()
-	listener := newTestListener(t)
-	mailbox := &registration{
-		ID: "not-started", listener: listener, server: &http.Server{},
-		mu: &sync.Mutex{}, drained: make(chan struct{}), done: make(chan struct{}),
-	}
-	r.mu.Lock()
-	r.registrations[mailbox.ID] = mailbox
-	r.startStop(mailbox)
-	r.mu.Unlock()
-	select {
-	case <-mailbox.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("pre-Serve drain did not finish")
-	}
-	if mailbox.forced || registrationCount(r) != 0 {
-		t.Fatal("pre-Serve drain was forced or retained capacity")
-	}
-	if err := mailbox.server.Serve(listener); !errors.Is(err, http.ErrServerClosed) {
-		t.Fatalf("late Serve = %v", err)
-	}
-	if _, err := listener.Accept(); !errors.Is(err, net.ErrClosed) {
-		t.Fatalf("pre-Serve listener not released: %v", err)
+	r.unregister(result, mailbox.ID)
+	if result.Code != 200 || !strings.Contains(result.Body.String(), `"forced":false`) || registrationCount(r) != 0 {
+		t.Fatalf("unused registration drain: %d %s", result.Code, result.Body.String())
 	}
 }

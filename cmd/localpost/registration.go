@@ -3,36 +3,33 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"mime"
-	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+	"uuid"
 )
 
 const registrationBodyLimit = 64 << 10
 
 type registration struct {
 	ID        string `json:"id"`
-	Port      int    `json:"port"`
 	directory string
-	listener  net.Listener
-	server    *http.Server
+	handler   *messageHandler
 
-	mu      *sync.Mutex
-	closing bool
-	forced  bool
-	active  int
-	drained chan struct{}
-	done    chan struct{}
+	mu       *sync.Mutex
+	closing  bool
+	forced   bool
+	active   int
+	drained  chan struct{}
+	done     chan struct{}
+	requests map[*activeRequest]struct{}
 }
 
 type registry struct {
@@ -42,11 +39,10 @@ type registry struct {
 	uploads           *uploadSlots
 	closed            bool
 	registrations     map[string]*registration
-	listen            func(string, string) (net.Listener, error)
 }
 
 func newRegistry() *registry {
-	return &registry{registrations: make(map[string]*registration), listen: net.Listen, gracePeriod: 30 * time.Second, registrationLimit: defaultRegistrationLimit, uploads: newUploadSlots(defaultUploadLimit)}
+	return &registry{registrations: make(map[string]*registration), gracePeriod: 30 * time.Second, registrationLimit: defaultRegistrationLimit, uploads: newUploadSlots(defaultUploadLimit)}
 }
 
 func (r *registry) register(directory string) (*registration, error) {
@@ -58,48 +54,51 @@ func (r *registry) register(directory string) (*registration, error) {
 	if len(r.registrations) >= r.registrationLimit {
 		return nil, errRegistrationLimit
 	}
-	listener, err := r.listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		return nil, fmt.Errorf("allocate mailbox listener: %w", err)
-	}
-	address, ok := listener.Addr().(*net.TCPAddr)
-	if !ok || address.Port < 1024 || address.Port > 65535 {
-		// Failed allocation must release even an unusable listener.
-		_ = listener.Close()
-		return nil, errors.New("mailbox listener did not allocate an unprivileged TCP port")
-	}
-	id := rand.Text()
+	id := uuid.NewV4().String()
 	for r.registrations[id] != nil {
-		id = rand.Text()
+		id = uuid.NewV4().String()
 	}
 	mailbox := &registration{
-		ID: id, Port: address.Port, directory: directory, listener: listener,
+		ID: id, directory: directory,
 		mu: &sync.Mutex{}, drained: make(chan struct{}), done: make(chan struct{}),
+		requests: make(map[*activeRequest]struct{}),
 	}
 	handler := newMessageHandler(directory)
 	handler.mailbox = mailbox
 	handler.uploads = r.uploads
-	mailbox.server = &http.Server{Handler: withCORS(handler, "POST, OPTIONS"), ReadHeaderTimeout: 5 * time.Second}
+	mailbox.handler = handler
 	r.registrations[id] = mailbox
-	go r.serveMailbox(mailbox)
 	return mailbox, nil
 }
 
-// Admission and publication share this lock with the forced cutoff. A request
-// already admitted may finish during draining, but cannot publish after force.
-func (m *registration) admit() bool {
+// Active abort callbacks remain owned until the handler's deferred cleanup has
+// completed. Force invokes them under the same lock used to remove them, so a
+// callback can never affect a later request reusing the connection.
+type activeRequest struct {
+	abort func()
+}
+
+// Admission, read deadlines, publication and force share the mailbox lock.
+func (m *registration) admitRequest(request *activeRequest) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closing {
 		return false
 	}
 	m.active++
+	if request != nil {
+		if m.requests == nil {
+			m.requests = make(map[*activeRequest]struct{})
+		}
+		m.requests[request] = struct{}{}
+	}
 	return true
 }
 
-func (m *registration) finished() {
+func (m *registration) finishedRequest(request *activeRequest) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	delete(m.requests, request)
 	m.active--
 	if m.closing && m.active == 0 {
 		close(m.drained)
@@ -117,25 +116,10 @@ func (m *registration) freeze() {
 
 func (m *registration) force() {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.forced = true
-	m.mu.Unlock()
-	// Both closes are needed if Serve has not yet started.
-	_ = m.listener.Close()
-	_ = m.server.Close()
-}
-
-func (r *registry) serveMailbox(mailbox *registration) {
-	_ = mailbox.server.Serve(mailbox.listener)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	mailbox.mu.Lock()
-	closing := mailbox.closing
-	mailbox.mu.Unlock()
-	if !closing {
-		// An unexpected listener failure aborts existing connections. An
-		// intentional Shutdown also returns from Serve, but must keep draining.
-		r.startStop(mailbox)
-		mailbox.force()
+	for request := range m.requests {
+		request.abort()
 	}
 }
 
@@ -155,17 +139,13 @@ func (r *registry) startStop(mailbox *registration) {
 func (r *registry) drain(mailbox *registration) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.gracePeriod)
 	defer cancel()
-	// Let Shutdown own the tracked listener close. Closing it first can make
-	// Shutdown report net.ErrClosed while Serve is still removing its listener,
-	// incorrectly marking an otherwise graceful drain as forced.
-	if err := mailbox.server.Shutdown(ctx); err != nil {
+	select {
+	case <-mailbox.drained:
+	case <-ctx.Done():
 		mailbox.force()
 	}
-	// Shutdown cannot track a listener before Serve starts. Release that
-	// allocation too; the shutdown flag prevents a later Serve from using it.
-	_ = mailbox.listener.Close()
-	// Close interrupts body reads. Wait for their deferred temporary-file cleanup
-	// before reporting completion or releasing ownership of the mapping.
+	// Filesystem operations may outlive the grace period. Keep the mapping and
+	// capacity owned until every handler has finished its cleanup attempt.
 	<-mailbox.drained
 	r.mu.Lock()
 	delete(r.registrations, mailbox.ID)
@@ -265,16 +245,42 @@ func validateDirectory(directory string) error {
 
 func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	controller := http.NewResponseController(w)
-	if id, ok := strings.CutPrefix(request.URL.Path, "/registrations/"); ok && id != "" && !strings.Contains(id, "/") {
-		if request.Method != http.MethodDelete {
-			abortMessageBody(w, controller)
-			w.Header().Set("Allow", http.MethodDelete)
-			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method must be DELETE")
+	if suffix, ok := strings.CutPrefix(request.URL.Path, "/registrations/"); ok {
+		parts := strings.Split(suffix, "/")
+		if len(parts) == 1 || (len(parts) == 2 && parts[1] == "messages") {
+			id := strings.ToLower(parts[0])
+			if !validRegistrationID(id) {
+				abortMessageBody(w, controller)
+				writeAPIError(w, http.StatusBadRequest, "invalid_registration_id", "registration id must be a UUIDv4")
+				return
+			}
+			if len(parts) == 2 {
+				r.mu.Lock()
+				mailbox := r.registrations[id]
+				r.mu.Unlock()
+				if mailbox == nil {
+					abortMessageBody(w, controller)
+					writeAPIError(w, http.StatusNotFound, "registration_not_found", "registration not found")
+					return
+				}
+				// Normalize only the UUID segment, leaving route names case-sensitive.
+				normalized := request.Clone(request.Context())
+				normalized.URL.Path = "/registrations/" + id + "/messages"
+				mailbox.handler.ServeHTTP(w, normalized)
+				return
+			}
+			if request.Method != http.MethodDelete {
+				abortMessageBody(w, controller)
+				w.Header().Set("Allow", http.MethodDelete)
+				writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method must be DELETE")
+				return
+			}
+			if request.ContentLength != 0 {
+				abortMessageBody(w, controller)
+			}
+			r.unregister(w, id)
 			return
 		}
-		abortMessageBody(w, controller)
-		r.unregister(w, id)
-		return
 	}
 	if request.URL.Path != "/registrations" {
 		abortMessageBody(w, controller)
@@ -338,6 +344,22 @@ func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	// A lost response does not undo an established registration.
 	_ = json.NewEncoder(w).Encode(mailbox)
+}
+
+// UUIDs use their canonical textual form, version 4 and the RFC variant.
+func validRegistrationID(id string) bool {
+	if len(id) != 36 || id[8] != '-' || id[13] != '-' || id[18] != '-' || id[23] != '-' || id[14] != '4' || !strings.ContainsRune("89abAB", rune(id[19])) {
+		return false
+	}
+	for index, char := range id {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			continue
+		}
+		if !strings.ContainsRune("0123456789abcdefABCDEF", char) {
+			return false
+		}
+	}
+	return true
 }
 
 func writeAPIError(w http.ResponseWriter, status int, code, message string) {

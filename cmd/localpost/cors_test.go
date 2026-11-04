@@ -96,7 +96,7 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 	targets := []struct{ url, methods string }{
 		{admin + "/registrations", "POST, DELETE, OPTIONS"},
 		{admin + "/registrations/" + mailboxes[0].ID, "POST, DELETE, OPTIONS"},
-		{fmt.Sprintf("http://127.0.0.1:%d/messages", mailboxes[0].Port), "POST, OPTIONS"},
+		{admin + messagePath(mailboxes[0].ID), "POST, DELETE, OPTIONS"},
 	}
 	for _, target := range targets {
 		data, headers, status := corsRequest(t, client, "OPTIONS", target.url, "", nil)
@@ -125,7 +125,7 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 	}
 	deliver := func(index int, contentType string, payload []byte) {
 		t.Helper()
-		url := fmt.Sprintf("http://127.0.0.1:%d/messages", mailboxes[index].Port)
+		url := admin + messagePath(mailboxes[index].ID)
 		data, _, status := corsRequest(t, client, "POST", url, contentType, payload)
 		if status != http.StatusOK {
 			t.Fatalf("delivery status %d: %s", status, data)
@@ -146,7 +146,7 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("unregister status %d", status)
 	}
-	assertPortClosed(t, fmt.Sprintf("127.0.0.1:%d", mailboxes[0].Port))
+	lifecycleAssertReleased(t, registry, mailboxes[0])
 	deliver(1, "application/octet-stream", []byte("sibling remains available"))
 	cancel()
 	select {
@@ -159,7 +159,7 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 		t.Fatal("shutdown timed out")
 	}
 	assertPortClosed(t, listener.Addr().String())
-	assertPortClosed(t, fmt.Sprintf("127.0.0.1:%d", mailboxes[1].Port))
+	lifecycleAssertReleased(t, registry, mailboxes[1])
 	if registrationCount(registry) != 0 {
 		t.Fatal("shutdown retained registrations")
 	}
@@ -182,7 +182,8 @@ func TestCORSIncompletePreflightBody(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	for _, address := range []string{admin.Addr().String(), fmt.Sprintf("127.0.0.1:%d", mailbox.Port)} {
+	for _, path := range []string{"/registrations", messagePath(mailbox.ID)} {
+		address := admin.Addr().String()
 		for _, framing := range []string{
 			"Content-Length: 4\r\n\r\nx",
 			"Transfer-Encoding: chunked\r\nTrailer: X-Preflight\r\n\r\n4\r\nx",
@@ -195,7 +196,7 @@ func TestCORSIncompletePreflightBody(t *testing.T) {
 			if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
 				t.Fatal(err)
 			}
-			_, err = fmt.Fprintf(conn, "OPTIONS /messages HTTP/1.1\r\nHost: %s\r\nOrigin: null\r\n%s", address, framing)
+			_, err = fmt.Fprintf(conn, "OPTIONS %s HTTP/1.1\r\nHost: %s\r\nOrigin: null\r\n%s", path, address, framing)
 			if err != nil {
 				t.Fatal(err)
 			}

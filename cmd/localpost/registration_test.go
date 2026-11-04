@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -15,6 +14,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -41,7 +41,7 @@ func registrationRequest(t *testing.T, r http.Handler, directory string) (*httpt
 	return response, result
 }
 
-func TestRegistrationListenersAndDirectories(t *testing.T) {
+func TestRegistrationIDsAndDirectories(t *testing.T) {
 	r := newRegistry()
 	defer r.close()
 	firstDir, secondDir := t.TempDir(), t.TempDir()
@@ -50,8 +50,16 @@ func TestRegistrationListenersAndDirectories(t *testing.T) {
 	if response.Code != http.StatusOK || secondResponse.Code != http.StatusOK {
 		t.Fatalf("registration statuses = %d, %d", response.Code, secondResponse.Code)
 	}
-	if first.ID == "" || first.ID == second.ID || first.Port == second.Port || first.Port < 1024 {
-		t.Fatalf("invalid distinct registrations: %+v, %+v", first, second)
+	pattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`)
+	if !pattern.MatchString(first.ID) || !pattern.MatchString(second.ID) || first.ID == second.ID {
+		t.Fatalf("invalid distinct registrations: %s, %s", first.ID, second.ID)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(response.Body.Bytes(), &fields); err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 1 || fields["id"] == nil {
+		t.Fatalf("registration response fields = %v", fields)
 	}
 	r.mu.Lock()
 	firstDestination, secondDestination := r.registrations[first.ID].directory, r.registrations[second.ID].directory
@@ -59,38 +67,44 @@ func TestRegistrationListenersAndDirectories(t *testing.T) {
 	if firstDestination != firstDir || secondDestination != secondDir {
 		t.Fatal("registration destinations were not retained separately")
 	}
-	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
-	defer client.CloseIdleConnections()
-	for _, mailbox := range []registration{first, second} {
-		response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/", mailbox.Port))
-		if err != nil {
-			t.Fatalf("returned mailbox was not reachable: %v", err)
-		}
-		if err := response.Body.Close(); err != nil {
-			t.Fatal(err)
-		}
-		if response.StatusCode != http.StatusNotFound {
-			t.Fatalf("mailbox status = %d", response.StatusCode)
-		}
-	}
 	for _, directory := range []string{firstDir, secondDir} {
-		entries, err := os.ReadDir(directory)
-		if err != nil || len(entries) != 0 {
-			t.Fatalf("registration left files: %v, %v", entries, err)
-		}
+		assertDirectoryEntries(t, directory, 0)
 	}
 	r.close()
-	for _, mailbox := range []registration{first, second} {
-		listener, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", mailbox.Port))
-		if err != nil {
-			t.Fatalf("mailbox port leaked: %v", err)
-		}
-		if err := listener.Close(); err != nil {
-			t.Fatal(err)
-		}
-	}
 	if registrationCount(r) != 0 {
 		t.Fatal("closed registry retained mappings")
+	}
+}
+
+func TestRegistrationRouteIDs(t *testing.T) {
+	r := newRegistry()
+	defer r.close()
+	for _, id := range []string{"invalid", "12345678-1234-7234-8234-123456789abc", "12345678-1234-4234-7234-123456789abc"} {
+		for _, suffix := range []string{"", "/messages"} {
+			method := http.MethodDelete
+			if suffix != "" {
+				method = http.MethodPost
+			}
+			response := httptest.NewRecorder()
+			r.ServeHTTP(response, httptest.NewRequest(method, "/registrations/"+id+suffix, nil))
+			if response.Code != 400 || !strings.Contains(response.Body.String(), "invalid_registration_id") {
+				t.Fatalf("invalid ID route: %d %s", response.Code, response.Body.String())
+			}
+		}
+	}
+	for _, path := range []string{"/registrations/12345678-1234-4234-8234-123456789abc", "/registrations/12345678-1234-4234-8234-123456789abc/messages", "/messages"} {
+		response := httptest.NewRecorder()
+		method := http.MethodPost
+		code := "registration_not_found"
+		if path == "/messages" {
+			code = "not_found"
+		} else if !strings.HasSuffix(path, "/messages") {
+			method = http.MethodDelete
+		}
+		r.ServeHTTP(response, httptest.NewRequest(method, path, nil))
+		if response.Code != 404 || !strings.Contains(response.Body.String(), code) {
+			t.Fatalf("missing ID route: %d %s", response.Code, response.Body.String())
+		}
 	}
 }
 
@@ -227,43 +241,16 @@ func TestRegistrationRequestValidation(t *testing.T) {
 	}
 }
 
-func TestRegistrationAllocationFailure(t *testing.T) {
-	r := newRegistry()
-	defer r.close()
-	r.listen = func(string, string) (net.Listener, error) { return nil, errors.New("synthetic bind failure") }
-	response, _ := registrationRequest(t, r, t.TempDir())
-	if response.Code != http.StatusServiceUnavailable || registrationCount(r) != 0 {
-		t.Fatalf("failed allocation = %d; mappings %d", response.Code, registrationCount(r))
-	}
-}
-
 func TestRegistrationConcurrentClose(t *testing.T) {
 	r := newRegistry()
 	directory := t.TempDir()
 	var workers sync.WaitGroup
-	addresses := make(chan string, 32)
 	for range 32 {
-		workers.Go(func() {
-			mailbox, err := r.register(directory)
-			if err == nil {
-				addresses <- fmt.Sprintf("127.0.0.1:%d", mailbox.Port)
-			}
-		})
+		workers.Go(func() { _, _ = r.register(directory) })
 	}
 	workers.Go(r.close)
 	workers.Wait()
-	close(addresses)
 	r.close()
-	for address := range addresses {
-		listener, err := net.Listen("tcp4", address)
-		if err != nil {
-			t.Errorf("concurrent close leaked %s: %v", address, err)
-			continue
-		}
-		if err := listener.Close(); err != nil {
-			t.Error(err)
-		}
-	}
 	response, _ := registrationRequest(t, r, directory)
 	if response.Code != http.StatusServiceUnavailable || registrationCount(r) != 0 {
 		t.Fatal("closed registry admitted registration")
@@ -306,7 +293,7 @@ func TestServeCancellationClosesMailbox(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("shutdown stalled")
 	}
-	rebound, err := net.Listen("tcp4", fmt.Sprintf("127.0.0.1:%d", mailbox.Port))
+	rebound, err := net.Listen("tcp4", listener.Addr().String())
 	if err != nil {
 		t.Fatalf("shutdown leaked mailbox: %v", err)
 	}
@@ -315,41 +302,13 @@ func TestServeCancellationClosesMailbox(t *testing.T) {
 	}
 }
 
-// badAddressListener simulates an allocation that violates our required port range.
-type badAddressListener struct{ net.Listener }
-
-func (badAddressListener) Addr() net.Addr { return &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 80} }
-
-func TestRegistrationRejectsInvalidAllocation(t *testing.T) {
+func TestSharedListenerFailureClosesConnections(t *testing.T) {
 	listener := newTestListener(t)
-	address := listener.Addr().String()
 	r := newRegistry()
-	defer r.close()
-	r.listen = func(string, string) (net.Listener, error) { return badAddressListener{listener}, nil }
-	response, _ := registrationRequest(t, r, t.TempDir())
-	if response.Code != http.StatusServiceUnavailable || registrationCount(r) != 0 {
-		t.Fatal("invalid allocation was admitted")
-	}
-	rebound, err := net.Listen("tcp4", address)
-	if err != nil {
-		t.Fatalf("invalid allocation leaked listener: %v", err)
-	}
-	if err := rebound.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestMailboxListenerFailureClosesConnections(t *testing.T) {
-	r := newRegistry()
-	defer r.close()
-	_, result := registrationRequest(t, r, t.TempDir())
-	r.mu.Lock()
-	mailbox := r.registrations[result.ID]
-	r.mu.Unlock()
-	if mailbox == nil {
-		t.Fatal("missing registered mailbox")
-	}
-	conn, err := net.DialTimeout("tcp4", mailbox.listener.Addr().String(), time.Second)
+	r.gracePeriod = 50 * time.Millisecond
+	done := make(chan error, 1)
+	go func() { done <- serveWithRegistry(context.Background(), listener, r) }()
+	conn, err := net.DialTimeout("tcp4", listener.Addr().String(), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,17 +324,27 @@ func TestMailboxListenerFailureClosesConnections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, readErr := io.Copy(io.Discard, response.Body)
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatal(err)
+	}
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if err := mailbox.listener.Close(); err != nil {
+	if err := listener.Close(); err != nil {
 		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("listener failure returned unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("listener failure stalled shutdown")
 	}
 	if _, err := reader.ReadByte(); !errors.Is(err, io.EOF) {
 		t.Fatalf("connection survived listener failure: %v", err)
+	}
+	if registrationCount(r) != 0 {
+		t.Fatal("listener failure retained registrations")
 	}
 }

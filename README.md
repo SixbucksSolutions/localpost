@@ -4,16 +4,15 @@ A localhost post office for agents.
 
 localpost is one shared service that receives HTTP POST bodies and delivers them
 unchanged as files in an agent-selected directory. An agent registers a mailbox,
-gets a dedicated listening port, and reads the resulting files with its normal
-filesystem tools.
+gets a UUIDv4 identity on the shared listener, and reads the resulting files with
+its normal filesystem tools.
 
-**Status:** the Go executable, loopback admin listener, mailbox registration,
+**Status:** the Go executable, shared loopback listener, mailbox registration,
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. A real-browser
-demonstration and release packaging remain in M04-M05. The planned M03 refactor
-will replace the current per-registration listeners with one shared listener
-and UUIDv4-addressed registrations; the API examples below describe the current
-implemented behavior until that refactor lands.
+demonstration and release packaging remain in M04-M05. The M03 API uses one
+listener and UUIDv4-addressed registrations; the old per-registration ports are
+removed.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -34,8 +33,8 @@ understand them.
 1. A person starts localpost as an ordinary user.
 2. An agent creates its destination directory and ensures localpost can write to it.
 3. The agent registers that directory through the admin API.
-4. localpost opens a dedicated loopback port and returns it in a `200` response.
-5. A sender posts a message to that port. localpost publishes one complete file:
+4. localpost returns a UUIDv4 registration ID in a `200` response.
+5. A sender posts a message to that registration's route. localpost publishes one complete file:
    `localpost_[UUIDv7].dat`.
 6. The agent reads the file. It unregisters the mailbox when finished.
 
@@ -96,43 +95,42 @@ files, and cleanup across repeated concurrent lifecycle cycles.
 The operator can start localpost with:
 
 ```powershell
-./bin/localpost.exe                 # Admin listener at http://127.0.0.1:53147
-./bin/localpost.exe --port 53148    # Override the admin port
+./bin/localpost.exe                 # Shared API at http://127.0.0.1:53147
+./bin/localpost.exe --port 53148    # Override the shared port
 ```
 
 Stop it with Ctrl+C. Shutdown stops new work, allows a shared grace period of up
 to 30 seconds, then interrupts unfinished requests. The startup message confirms
-the bound address. Registration
-is available on the admin port; each allocated mailbox accepts messages at
-`/messages`. Full release packaging belongs to a later milestone.
+the bound address. Control and message routes use this same listener. Full
+release packaging belongs to a later milestone.
 
-There is no configuration file. The admin listener and all mailbox listeners
-use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
-to fail clearly; localpost does not silently choose a different admin port.
+There is no configuration file. The shared listener uses an unprivileged TCP
+port on `127.0.0.1`. An occupied port causes startup to fail clearly; localpost
+does not silently choose another port.
 
 ## Registration API
 
 The control API uses JSON for requests, success responses, and application errors.
-Register an existing absolute directory with `POST /registrations` on the admin
+Register an existing absolute directory with `POST /registrations` on the shared
 port. The caller creates the directory and arranges its permissions:
 
 ```powershell
 $inbox = Join-Path $env:TEMP 'localpost-inbox'
 New-Item -ItemType Directory -Force -Path $inbox | Out-Null
 $body = @{ directory = $inbox } | ConvertTo-Json
-Invoke-RestMethod -Method Post -Uri http://127.0.0.1:53147/registrations `
+$registration = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:53147/registrations `
     -ContentType application/json -Body $body
 ```
 
-A successful registration returns HTTP `200` with the assigned identity and port:
+A successful registration returns HTTP `200` with the assigned UUIDv4 identity:
 
 ```json
-{"id":"opaque-registration-id","port":54321}
+{"id":"4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"}
 ```
 
-The port is already bound on `127.0.0.1` before success is returned. The identity
-is opaque to callers. Multiple registrations remain independent, and all are
-forgotten when the daemon exits. Stopping the daemon closes their listeners.
+There is no registration-specific port. The ID identifies a logical mailbox,
+not an authentication credential. Multiple registrations remain independent,
+and all are forgotten when the daemon exits. Existing files are unchanged.
 
 localpost checks writability with a temporary probe file, which it closes and
 removes before accepting the directory. It does not create directories or change
@@ -140,8 +138,9 @@ their permissions. A successful probe is not a guarantee that later writes will
 succeed.
 
 Registration requests accept one JSON object, at most 64 KiB, with media-type
-parameters such as `charset=utf-8` permitted. Reading the request headers and
-body has a 30-second budget; this is not a deadline for filesystem operations.
+parameters such as `charset=utf-8` permitted. Control-request reads have a
+30-second budget; upload reads use their separate idle deadline. These limits
+do not impose a deadline on filesystem operations.
 Application errors return an `error` object containing a stable `code` and a
 readable `message`, for example:
 
@@ -151,30 +150,30 @@ readable `message`, for example:
 
 | HTTP status | Error code |
 | --- | --- |
-| `400` | `invalid_request` or `invalid_directory` |
-| `404` | `not_found` |
+| `400` | `invalid_request`, `invalid_directory`, or `invalid_registration_id` |
+| `404` | `not_found` or `registration_not_found` |
 | `405` | `method_not_allowed` (with `Allow: POST`) |
 | `413` | `request_too_large` |
 | `415` | `unsupported_media_type` |
 | `503` | `unavailable` or `registration_limit` |
 
-A lost response does not undo an established registration. The admin port is
-for JSON control requests; mailbox payloads remain opaque bytes.
+A lost response does not undo an established registration. Control requests
+use JSON; mailbox payloads remain opaque bytes on the same listener.
 Browser callers use the permissive CORS policy described below.
 
 ## Unregistration API
 
-Use `DELETE /registrations/{id}` on the admin port to retire one mailbox:
+Use `DELETE /registrations/{id}` to retire one mailbox:
 
 ```powershell
 Invoke-RestMethod -Method Delete `
-    -Uri "http://127.0.0.1:53147/registrations/$($mailbox.id)"
+    -Uri "http://127.0.0.1:53147/registrations/$($registration.id)"
 ```
 
 Successful completion returns JSON:
 
 ```json
-{"id":"opaque-registration-id","unregistered":true,"forced":false}
+{"id":"4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b","unregistered":true,"forced":false}
 ```
 
 The mailbox first stops accepting new uploads. Accepted uploads can finish
@@ -182,6 +181,7 @@ during its 30-second grace period. After the deadline, remaining uploads are
 interrupted; `forced: true` indicates that this cutoff was needed. Progress does
 not extend the shutdown deadline. Completed `.dat` files remain untouched, and
 other mailboxes remain usable.
+Deleting a registration does not shut down the shared HTTP listener.
 
 Completion waits for local request cleanup. The 30 seconds bounds network drain,
 not operating-system filesystem calls that may take longer to return.
@@ -195,7 +195,7 @@ when the process exits.
 
 ## Message API
 
-Send a message with `POST /messages` on the port returned by registration. Use
+Send a message with `POST /registrations/{id}/messages` on the shared port. Use
 `application/octet-stream` or `application/json`; media-type parameters are
 accepted. Both bodies are opaque bytes, so JSON-labelled content is not parsed
 or repaired. HTTP transfer framing is removed by the HTTP server; content
@@ -204,10 +204,8 @@ encoding is not decompressed.
 For example, after registering an inbox:
 
 ```powershell
-$mailbox = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:53147/registrations `
-    -ContentType application/json -Body $body
 $delivery = Invoke-RestMethod -Method Post `
-    -Uri "http://127.0.0.1:$($mailbox.port)/messages" `
+    -Uri "http://127.0.0.1:53147/registrations/$($registration.id)/messages" `
     -ContentType application/json -Body '{"event":"test"}'
 Get-Content -LiteralPath (Join-Path $inbox $delivery.filename) -Raw
 ```
@@ -245,17 +243,16 @@ remains the agent's responsibility. No extra runtime configuration is required.
 
 ## Browser CORS
 
-Admin and mailbox responses, including application errors, send
-`Access-Control-Allow-Origin: *`. Both allow the `Content-Type` request header.
-The admin listener advertises `POST, DELETE, OPTIONS`; mailbox listeners
-advertise `POST, OPTIONS`. No credentials, tokens, or origin registration are
+Control and message responses, including application errors, send
+`Access-Control-Allow-Origin: *`. The shared listener allows the `Content-Type`
+request header and advertises `POST, DELETE, OPTIONS`. No credentials, tokens, or origin registration are
 needed. `OPTIONS` preflights return `204` without creating a registration or file.
 
-After the agent prepares a directory and supplies its registered mailbox port,
+After the agent prepares a directory and supplies its registration ID,
 browser JavaScript can send a JSON diagnostic and read the JSON receipt:
 
 ```javascript
-const response = await fetch(`http://127.0.0.1:${mailboxPort}/messages`, {
+const response = await fetch(`http://127.0.0.1:53147/registrations/${registrationId}/messages`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   credentials: "omit",
@@ -308,8 +305,16 @@ notifications are hints; agents should also reconcile directory contents.
 - **Person running localpost:** start and stop the shared service.
 
 Unregistering stops new uploads, lets accepted uploads finish within the timeout,
-and closes that mailbox's listener. Delivered files remain in place. localpost
+and removes that logical mailbox. Delivered files remain in place. localpost
 never creates or repairs the destination directory and never deletes deliveries.
+
+## Migrating from the per-port prototype
+
+Restart localpost and register again to obtain UUIDv4 IDs. Registrations were
+already ephemeral, so no registration-state migration is needed. Change senders
+to use the shared port and ID-bearing message path; the registration response no
+longer contains `port`. The old bare `/messages` route is not a compatibility API.
+Previously delivered UUIDv7 files remain unchanged.
 
 ## Project documents
 

@@ -1,6 +1,7 @@
 # ADR 0001: One shared service with a mailbox per registration
 
 - **Status:** Accepted
+- **Update:** per-registration listener/port details are superseded by [ADR 0007](0007-single-port-uuid-routing.md); the original decision below is retained as history.
 - **Date:** 2026-11-04
 
 ## Context

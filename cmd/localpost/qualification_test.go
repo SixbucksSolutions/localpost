@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -32,7 +33,7 @@ func TestQualificationCombinedCycles(t *testing.T) {
 			registered[i] = lifecycleRegister(t, client, url, directories[i])
 			owned = append(owned, lifecycleMailbox(r, registered[i].ID))
 			payload := []byte{0, 255, byte(cycle), byte(i), '\r', '\n'}
-			name := qualificationPost(t, client, registered[i], payload, http.StatusOK)
+			name := qualificationPost(t, client, url, registered[i], payload, http.StatusOK)
 			retained[i][name] = payload
 		}
 		response, _ := registrationRequest(t, r, directories[0])
@@ -40,10 +41,10 @@ func TestQualificationCombinedCycles(t *testing.T) {
 			t.Fatalf("cycle %d: registration cap = %d", cycle, response.Code)
 		}
 
-		first, reader := qualificationUpload(t, registered[0])
-		canceled, _ := qualificationUpload(t, registered[1])
+		first, reader := qualificationUpload(t, url, registered[0])
+		canceled, _ := qualificationUpload(t, url, registered[1])
 		lifecycleWait(t, func() bool { return len(r.uploads.held) == 2 })
-		qualificationPost(t, client, registered[2], []byte("saturated"), http.StatusServiceUnavailable)
+		qualificationPost(t, client, url, registered[2], []byte("saturated"), http.StatusServiceUnavailable)
 		if err := canceled.Close(); err != nil {
 			t.Fatal(err)
 		}
@@ -55,13 +56,13 @@ func TestQualificationCombinedCycles(t *testing.T) {
 		if err := os.Rename(directories[2], moved); err != nil {
 			t.Fatal(err)
 		}
-		qualificationPost(t, client, registered[2], []byte("unavailable storage"), http.StatusInternalServerError)
+		qualificationPost(t, client, url, registered[2], []byte("unavailable storage"), http.StatusInternalServerError)
 		if err := os.Rename(moved, directories[2]); err != nil {
 			t.Fatal(err)
 		}
 		lifecycleWait(t, func() bool { return len(r.uploads.held) == 1 })
 		payload := []byte(fmt.Sprintf("recovered sibling %d\x00\xff", cycle))
-		name := qualificationPost(t, client, registered[2], payload, http.StatusOK)
+		name := qualificationPost(t, client, url, registered[2], payload, http.StatusOK)
 		retained[2][name] = payload
 
 		replies := make(chan lifecycleReply, 2)
@@ -114,7 +115,7 @@ func TestQualificationCombinedCycles(t *testing.T) {
 		replacement := lifecycleRegister(t, client, url, directories[0])
 		replacementOwner := lifecycleMailbox(r, replacement.ID)
 		owned = append(owned, replacementOwner)
-		pending, pendingReader := qualificationUpload(t, replacement)
+		pending, pendingReader := qualificationUpload(t, url, replacement)
 		lifecycleWait(t, func() bool { return len(r.uploads.held) == 1 })
 		cancel()
 		lifecycleWait(t, func() bool {
@@ -179,9 +180,9 @@ func qualificationServer(t *testing.T, address string) (*registry, string, conte
 	return r, "http://" + listener.Addr().String(), cancel, done
 }
 
-func qualificationUpload(t *testing.T, mailbox registration) (net.Conn, *bufio.Reader) {
+func qualificationUpload(t *testing.T, url string, mailbox registration) (net.Conn, *bufio.Reader) {
 	t.Helper()
-	conn, err := net.DialTimeout("tcp4", fmt.Sprintf("127.0.0.1:%d", mailbox.Port), time.Second)
+	conn, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +190,7 @@ func qualificationUpload(t *testing.T, mailbox registration) (net.Conn, *bufio.R
 	if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := io.WriteString(conn, "POST /messages HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 6\r\n\r\nabc"); err != nil {
+	if _, err := io.WriteString(conn, "POST "+messagePath(mailbox.ID)+" HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 6\r\n\r\nabc"); err != nil {
 		t.Fatal(err)
 	}
 	return conn, bufio.NewReader(conn)
@@ -212,9 +213,9 @@ func qualificationReceipt(t *testing.T, reader *bufio.Reader, status int) messag
 	return receipt
 }
 
-func qualificationPost(t *testing.T, client *http.Client, mailbox registration, payload []byte, status int) string {
+func qualificationPost(t *testing.T, client *http.Client, url string, mailbox registration, payload []byte, status int) string {
 	t.Helper()
-	response, err := client.Post(fmt.Sprintf("http://127.0.0.1:%d/messages", mailbox.Port), "application/octet-stream", bytes.NewReader(payload))
+	response, err := client.Post(url+messagePath(mailbox.ID), "application/octet-stream", bytes.NewReader(payload))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +253,7 @@ func qualificationReleased(t *testing.T, r *registry, mailbox *registration) {
 	if active != 0 || lifecycleMailbox(r, mailbox.ID) != nil {
 		t.Fatal("finished mailbox retained handlers or registry ownership")
 	}
-	lifecycleAssertReleased(t, *mailbox)
+	lifecycleAssertReleased(t, r, *mailbox)
 }
 
 func qualificationFiles(t *testing.T, directory string, expected map[string][]byte) {

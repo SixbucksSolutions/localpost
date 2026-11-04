@@ -12,6 +12,7 @@ maintainer; it does not mean the behavior has been implemented or tested.
 | [0004](0004-best-effort-lifecycle.md) | Ephemeral registration and best-effort lifecycle | Accepted | 2026-11-04 |
 | [0005](0005-trusted-localhost-cors.md) | Trusted localhost, plain HTTP, and permissive CORS | Accepted | 2026-11-04 |
 | [0006](0006-go-implementation-language.md) | Implement localpost in Go | Accepted | 2026-11-04 |
+| [0007](0007-single-port-uuid-routing.md) | One listener with UUIDv4 registration routing | Accepted | 2026-11-04 |
 
 ## Open implementation decisions
 
@@ -20,7 +21,7 @@ These are not additional accepted requirements:
 - Release packaging and initially supported operating systems. Development uses
   Go 1.27.3 as recorded in `.go-version` and the README.
 - Remaining API refinements. Registration uses `POST /registrations`, removal
-  uses `DELETE /registrations/{id}`, and mailbox delivery uses `POST /messages`;
+  uses `DELETE /registrations/{id}`, and delivery uses `POST /registrations/{id}/messages`;
   their contracts are documented in the README.
 - Broader qualification of the implemented registration/upload limits and
   slow-progress behavior. Current fixed defaults are documented in the README.

@@ -1,6 +1,7 @@
 # ADR 0002: Unprivileged loopback listeners and zero configuration files
 
 - **Status:** Accepted
+- **Update:** per-registration listener allocation is superseded by [ADR 0007](0007-single-port-uuid-routing.md); the shared loopback port, override, and ordinary-user operation remain.
 - **Date:** 2026-11-04
 
 ## Context

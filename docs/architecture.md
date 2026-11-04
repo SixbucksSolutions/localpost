@@ -1,6 +1,6 @@
 # High-level architecture
 
-**Status:** target architecture. The executable, admin listener, and mailbox
+**Status:** one-listener architecture. The executable, UUID-addressed mailbox
 registration, message delivery, unregistration, and browser CORS are implemented.
 Bounded robustness qualification accompanies the core. The real-browser
 demonstration remains a later milestone.
@@ -23,28 +23,26 @@ guarantee. Concurrency and shutdown still require explicit ownership and tests.
 ```mermaid
 flowchart LR
     Operator[Person running localpost] --> Process[Shared localpost process]
-    Agent[Agent] -->|Register / unregister| Admin[Admin HTTP listener: 53147]
-    Admin --> Registry[In-memory registration table]
-    Registry --> Mailbox[Dedicated mailbox HTTP listener]
-    Sender[Browser JS or HTTP client] -->|POST body| Mailbox
-    Mailbox --> Writer[Temporary file then complete-file publication]
+    Agent[Agent] -->|Register / unregister| Listener[Shared HTTP listener: 53147]
+    Sender[Browser JS or HTTP client] -->|POST with registration ID in path| Listener
+    Listener --> Registry[In-memory UUIDv4 registration table]
+    Registry --> Writer[Temporary file then complete-file publication]
     Writer --> Directory[Agent-created directory]
     Directory -->|Read complete .dat files| Agent
-    Process --- Admin
-    Process --- Mailbox
+    Process --- Listener
 ```
 
-The diagram shows one registration. A single process can host several mailbox
-listeners. Each registration maps an identity and listening port to one existing
-absolute directory. The admin API creates and removes these mappings.
+The diagram shows one registration. Each UUIDv4 maps to one existing absolute
+directory and its logical request-lifecycle state. The shared API creates and
+removes these mappings; registrations own no HTTP server or listening port.
 
-All listeners bind to `127.0.0.1` and use plain HTTP. The default admin port is
-`53147`; `--port` changes it. Mailbox ports are allocated from available
-unprivileged ports. Port allocation must bind the actual listener before reporting
-success, rather than probe a free port and try to claim it later.
+The listener binds to `127.0.0.1` and uses plain HTTP. The default port is `53147`;
+`--port` changes it. Startup binds the actual unprivileged port before announcing
+readiness. [ADR 0007](adr/0007-single-port-uuid-routing.md) records the cutover
+from the per-registration-port prototype.
 
 There is no daemon configuration file, persistent registry, or separate database.
-Active requests, listeners, and registrations necessarily have in-memory state;
+Active requests, the listener, and registrations necessarily have in-memory state;
 "stateless" here means none of that state is recovered after process restart.
 Delivered files belong to the agent and survive independently of the daemon.
 
@@ -54,30 +52,27 @@ Delivered files belong to the agent and survive independently of the daemon.
 2. It sends an admin request containing the absolute directory path.
 3. localpost checks that the path is an existing usable directory. It does not
    create missing parents, alter permissions, or choose a replacement directory.
-4. localpost opens a dedicated mailbox listener and records its directory mapping.
-5. Only after the listener is ready does the admin API return `200`, with the
-   registration identity and assigned port.
+4. localpost creates a UUIDv4 registration and records its directory mapping.
+5. The API returns `200` with the registration ID. It allocates no new listener.
 
 A failed registration leaves no active mailbox. Registration-time checking does
 not guarantee later writes: the directory can disappear or become unwritable.
 Each delivery must report its actual outcome.
 
 The implemented registration route is `POST /registrations`, with a JSON object
-containing `directory`. It returns HTTP `200` with `id` and `port` after binding
-the mailbox listener. Application errors use a JSON `error` object with stable
+containing `directory`. It returns HTTP `200` with `id`. Application errors use a
+JSON `error` object with stable
 `code` and readable `message`. The control API is JSON; message bodies stay opaque.
 The registration identity is an opaque value for callers.
 
-The admin request is bounded to 64 KiB, with a 30-second headers-and-body read
+The control request is bounded to 64 KiB, with a 30-second read
 budget. This does not impose a deadline on filesystem operations. Directory
-validation creates, closes,
-and removes a temporary probe before accepting the registration; it never
-creates the directory or alters permissions. Future admin routes remain to be
-selected by their implementation stories; mailbox delivery uses `POST /messages`.
+validation creates, closes, and removes a temporary probe before accepting the
+registration; it never creates the directory or alters permissions.
 
 ## Receiving and publishing a message
 
-One completed `POST /messages` body on a mailbox port is one message. The accepted
+One completed `POST /registrations/{id}/messages` body is one message. The accepted
 media types are `application/octet-stream` and `application/json`, including
 media-type parameters. Both types use the same opaque-byte pipeline.
 
@@ -106,7 +101,7 @@ there is no copy-to-final fallback that could expose partial contents. A final
 name can be read only after the underlying file is complete and closed.
 
 The mailbox read deadline is renewed while bytes arrive, rather than applying
-the admin API's absolute 30-second read limit to the whole upload. It does not
+the control API's absolute 30-second read limit to the whole upload. It does not
 bound filesystem operation duration. The final response is JSON with `filename`
 and `bytes`; the message itself is never wrapped in a JSON envelope.
 
@@ -125,18 +120,18 @@ filesystem notification represents exactly one new message.
 
 ## Browser interoperability
 
-The mailbox responds to CORS preflights and includes CORS headers on success and
+The shared API responds to CORS preflights and includes CORS headers on success and
 error responses. The agreed policy is:
 
 ```http
 Access-Control-Allow-Origin: *
-Access-Control-Allow-Methods: POST, OPTIONS
+Access-Control-Allow-Methods: POST, DELETE, OPTIONS
 Access-Control-Allow-Headers: Content-Type
 ```
 
 `OPTIONS` does not produce a delivery file. The service has no authentication,
-credential requirement, or origin allowlist. Admin CORS follows the same
-permissive origin policy and advertises `POST, DELETE, OPTIONS`.
+credential requirement, or origin allowlist. Control and message routes use the
+same permissive origin policy.
 
 Different localhost ports are different browser origins. CORS enables that
 cross-origin exchange, but it does not override the sending application's CSP or
@@ -147,9 +142,9 @@ bytes to localpost; file publication remains centralized here.
 ## Unregistration and process lifecycle
 
 `DELETE /registrations/{id}` stops accepting new uploads on that registration,
-allows accepted uploads to finish within a 30-second grace period, then closes
-the listener and removes the mapping. Remaining incomplete uploads are aborted
-without publishing final files. Upload progress does not extend that deadline.
+allows accepted uploads to finish within a 30-second grace period, then removes
+the mapping. It does not close the shared listener. Remaining incomplete uploads
+are aborted without publishing final files. Upload progress does not extend that deadline.
 Concurrent callers share the active stop operation; a later request for a removed
 registration returns `404` with `registration_not_found`.
 
@@ -160,12 +155,16 @@ and drains mailboxes together under one network deadline. Completion waits for
 local handler cleanup; operating-system filesystem calls are not covered by a
 hard real-time deadline.
 
+Forced interruption is bound to the admitted request's lifetime. Finished
+requests remove their interruption hooks before the connection can be reused,
+so an old registration cannot abort a later request for a different one.
+
 Unregistration does not delete completed files. A normal process stop likewise
-closes listeners with bounded network cleanup. A crash loses every registration;
+closes the listener with bounded network cleanup. A crash loses every registration;
 there is no restart recovery. Agents register again after a person restarts the
 daemon. Agents do not start it automatically or create a substitute collector.
 
-An occupied admin port fails startup clearly. Bind failures, directory failures,
+An occupied shared port fails startup clearly. Bind failures, directory failures,
 and write failures are surfaced rather than silently changing the requested
 destination or port.
 
@@ -191,14 +190,14 @@ delivered files to recover space. Disk exhaustion is a delivery failure.
 
 The implementation should establish these properties before release:
 
-- Registration only reports success after a real mailbox listener is ready.
-- Multiple mailboxes keep destinations separate; failed registration leaks no port.
+- Startup reports readiness only after the shared listener is bound.
+- UUIDv4 routing keeps destinations separate; failed registration leaves no mapping.
 - Binary, JSON-labelled, and empty bodies are reproduced byte for byte.
 - Readers see complete final files; interrupted uploads publish no partial delivery.
 - Limit, timeout, disk-failure, and directory-loss cases cannot report false success.
 - CORS preflights and error responses work from an actual browser; preflights write no files.
 - Unregistration and process stop are bounded and preserve completed deliveries.
-- Restart restores no registrations; ports remain unprivileged and loopback-only.
+- Restart restores no registrations; the listener stays unprivileged and loopback-only.
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
 concurrency qualification tests, plus a Linux race-instrumented CI run. Packaging,

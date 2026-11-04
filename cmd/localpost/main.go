@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"time"
 )
 
@@ -25,7 +26,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	cfg := config{port: defaultPort}
 	flags := flag.NewFlagSet("localpost", flag.ContinueOnError)
 	flags.SetOutput(output)
-	flags.IntVar(&cfg.port, "port", defaultPort, "admin TCP port (1024-65535)")
+	flags.IntVar(&cfg.port, "port", defaultPort, "TCP port (1024-65535)")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -33,7 +34,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 		return config{}, fmt.Errorf("unexpected argument %q", flags.Arg(0))
 	}
 	if cfg.port < 1024 || cfg.port > 65535 {
-		return config{}, fmt.Errorf("admin port must be between 1024 and 65535 (got %d)", cfg.port)
+		return config{}, fmt.Errorf("port must be between 1024 and 65535 (got %d)", cfg.port)
 	}
 	return cfg, nil
 }
@@ -57,21 +58,32 @@ func serve(ctx context.Context, listener net.Listener) error {
 
 func serveWithRegistry(ctx context.Context, listener net.Listener, registrations *registry) error {
 	defer registrations.close()
+	connections := &connectionTracker{states: make(map[net.Conn]http.ConnState)}
 	server := &http.Server{
 		Handler:           withCORS(registrations, "POST, DELETE, OPTIONS"),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
+		ConnState:         connections.track,
 	}
 	stopped := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
 		defer close(stopped)
 		grace, cancel := context.WithTimeout(context.Background(), registrations.gracePeriod)
 		defer cancel()
-		// Freeze every mailbox before closing admin connections. Existing uploads
-		// use their own connections and continue within the common grace budget.
+		// Freeze registration admission before closing the single listener. All
+		// accepted uploads share this one grace budget.
 		mailboxes := registrations.stopAll()
-		_ = listener.Close()
-		_ = server.Close()
+		connections.stopIdle()
+		if err := server.Shutdown(grace); err != nil {
+			for _, mailbox := range mailboxes {
+				select {
+				case <-mailbox.done:
+				default:
+					mailbox.force()
+				}
+			}
+			_ = server.Close()
+		}
 		registrations.shutdown(grace)
 		for _, mailbox := range mailboxes {
 			<-mailbox.done
@@ -85,9 +97,42 @@ func serveWithRegistry(ctx context.Context, listener net.Listener, registrations
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("serve admin HTTP: %w", err)
+		return fmt.Errorf("serve HTTP: %w", err)
 	}
 	return nil
+}
+
+// Incomplete headers have not admitted an upload. Close those connections at
+// shutdown along with idle keep-alives, while active handlers retain the grace
+// period. Ownership stays synchronized with net/http's state callbacks.
+type connectionTracker struct {
+	mu       sync.Mutex
+	states   map[net.Conn]http.ConnState
+	stopping bool
+}
+
+func (t *connectionTracker) track(connection net.Conn, state http.ConnState) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if state == http.StateClosed || state == http.StateHijacked {
+		delete(t.states, connection)
+		return
+	}
+	t.states[connection] = state
+	if t.stopping && (state == http.StateNew || state == http.StateIdle) {
+		_ = connection.Close()
+	}
+}
+
+func (t *connectionTracker) stopIdle() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.stopping = true
+	for connection, state := range t.states {
+		if state == http.StateNew || state == http.StateIdle {
+			_ = connection.Close()
+		}
+	}
 }
 
 func main() {

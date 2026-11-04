@@ -74,7 +74,7 @@ func TestHTTPAdminEarlyRejection(t *testing.T) {
 		}{
 			{"path", "POST", "/missing", "application/json", 404, "not_found"},
 			{"method", "PUT", "/registrations", "application/json", 405, "method_not_allowed"},
-			{"delete method", "POST", "/registrations/missing", "application/json", 405, "method_not_allowed"},
+			{"delete method", "POST", "/registrations/12345678-1234-4234-8234-123456789abc", "application/json", 405, "method_not_allowed"},
 			{"media", "POST", "/registrations", "text/plain", 415, "unsupported_media_type"},
 		} {
 			t.Run(tc.name+framing, func(t *testing.T) {
@@ -278,4 +278,98 @@ func TestHTTPOpaqueContentEncodingAndChunkedReuse(t *testing.T) {
 		time.Sleep(80 * time.Millisecond)
 	}
 	assertDirectoryEntries(t, directory, 2)
+}
+
+// Requests deliberately cross the server's total read budget. Uploads reset an
+// idle budget, while control JSON remains bounded by the total read deadline.
+func TestHTTPSharedListenerRouteDeadlines(t *testing.T) {
+	server, r := newHTTPEdgeAdmin(t, 100*time.Millisecond)
+	directory := t.TempDir()
+	_, mailbox := registrationRequest(t, r, directory)
+	owner := lifecycleMailbox(r, mailbox.ID)
+	owner.handler.idleTimeout = 90 * time.Millisecond
+	connection := deliveryConnection(t, server)
+	reader := bufio.NewReader(connection)
+	if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 6\r\n\r\n", messagePath(mailbox.ID)); err != nil {
+		t.Fatal(err)
+	}
+	for range 6 {
+		if _, err := io.WriteString(connection, "x"); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(30 * time.Millisecond)
+	}
+	if closed := readHTTPEdgeResponse(t, reader, 200, ""); closed {
+		t.Fatal("progressing upload closed reusable connection")
+	}
+	assertDirectoryEntries(t, directory, 1)
+	if _, err := io.WriteString(connection, "POST /registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		time.Sleep(30 * time.Millisecond)
+		if _, err := io.WriteString(connection, " "); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !readHTTPEdgeResponse(t, reader, 400, "invalid_request") {
+		t.Fatal("incomplete control body remained reusable")
+	}
+	assertHTTPEdgeClosed(t, connection, reader)
+	if registrationCount(r) != 1 {
+		t.Fatal("incomplete control JSON registered a destination")
+	}
+}
+
+func TestHTTPSharedConnectionAcrossRegistrationsAndDelete(t *testing.T) {
+	server, r := newHTTPEdgeAdmin(t, time.Second)
+	connection := deliveryConnection(t, server)
+	reader := bufio.NewReader(connection)
+	directories := []string{t.TempDir(), t.TempDir()}
+	var mailboxes []registration
+	for _, directory := range directories {
+		body, err := json.Marshal(map[string]string{"directory": directory})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Fprintf(connection, "POST /registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+			t.Fatal(err)
+		}
+		response, err := http.ReadResponse(reader, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mailbox registration
+		decodeErr := json.NewDecoder(response.Body).Decode(&mailbox)
+		closeErr := response.Body.Close()
+		if decodeErr != nil || closeErr != nil || response.StatusCode != 200 || response.Close {
+			t.Fatalf("registration on shared connection failed: %d %v %v", response.StatusCode, decodeErr, closeErr)
+		}
+		mailboxes = append(mailboxes, mailbox)
+	}
+	for _, mailbox := range mailboxes {
+		if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 1\r\n\r\nx", messagePath(mailbox.ID)); err != nil {
+			t.Fatal(err)
+		}
+		if readHTTPEdgeResponse(t, reader, 200, "") {
+			t.Fatal("upload closed shared connection")
+		}
+	}
+	if _, err := fmt.Fprintf(connection, "DELETE /registrations/%s HTTP/1.1\r\nHost: localhost\r\n\r\n", mailboxes[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if readHTTPEdgeResponse(t, reader, 200, "") {
+		t.Fatal("delete closed shared connection")
+	}
+	if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 1\r\n\r\ny", messagePath(mailboxes[1].ID)); err != nil {
+		t.Fatal(err)
+	}
+	if readHTTPEdgeResponse(t, reader, 200, "") {
+		t.Fatal("sibling upload closed shared connection")
+	}
+	assertDirectoryEntries(t, directories[0], 1)
+	assertDirectoryEntries(t, directories[1], 2)
+	if registrationCount(r) != 1 {
+		t.Fatal("delete changed sibling ownership")
+	}
 }

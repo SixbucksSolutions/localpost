@@ -16,9 +16,9 @@ use case, but the payload contract is general.
 ## The intended experience
 
 The person starts localpost once. An agent prepares a private working directory
-and requests a mailbox. localpost returns a dedicated listening port. Browser
-JavaScript or another HTTP client posts messages to that port. Complete files
-appear in the directory, ready for the agent to inspect.
+and requests a mailbox. localpost returns a UUIDv4 registration ID. Browser
+JavaScript or another HTTP client posts messages to its route on the shared
+listener. Complete files appear in the directory, ready for the agent to inspect.
 
 The agent can repeat a bounded browser action, read the resulting diagnostics,
 make a correction, and retest. Screenshots and application tests still serve
@@ -45,9 +45,9 @@ for running the shared daemon. If it is unavailable, the agent reports that fact
 
 ## First-version scope
 
-- An admin listener on TCP port `53147`, overridable with `--port`.
+- A shared listener on TCP port `53147`, overridable with `--port`.
 - Registration and unregistration of agent-selected directories.
-- A dedicated loopback HTTP listener for each registration.
+- One loopback HTTP listener with UUIDv4-addressed registrations.
 - `application/octet-stream` and `application/json` message bodies.
 - Byte-preserving delivery to `localpost_[UUIDv7].dat` files.
 - Bounded uploads, clear HTTP outcomes, and bounded listener shutdown.
@@ -75,12 +75,12 @@ and exactly-once delivery are also outside this version's agreed scope.
 
 ## Current stage
 
-The current foundation provides a Go executable, loopback admin listener, and
+The current foundation provides a Go executable, shared loopback listener, and
 JSON mailbox registration, opaque message delivery, mailbox unregistration,
 and permissive browser CORS. The core has HTTP integration, bounded robustness,
 and race-instrumented verification. A real-browser demonstration and a packaged
 release remain later work.
 **Go is the selected implementation language**, as recorded
 in [ADR 0006](adr/0006-go-implementation-language.md), with Go 1.27.3 selected for
-development. Release packaging and targets, exact API routes, and remaining
-protocol details are open; see the [ADR ledger](adr/README.md).
+development. Release packaging and targets remain open; see the
+[ADR ledger](adr/README.md).
