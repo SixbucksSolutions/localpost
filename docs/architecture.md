@@ -175,11 +175,16 @@ other local programs or webpages. It has no TLS, tokens, origin allowlists, or
 application-level payload screening. The process runs with the ordinary user's
 filesystem permissions and does not elevate itself.
 
-Limits protect process operation without changing that trust model. The body
-limit and idle timeout are agreed; total registrations, concurrent uploads,
-aggregate temporary storage, and handling of slow-but-active uploads still need
-explicit implementation limits. Localpost never removes delivered files to
-recover space. Disk exhaustion is a delivery failure.
+Limits protect process operation without changing that trust model. The fixed
+defaults allow 64 live registrations and 16 globally admitted uploads, each
+bounded by 10 MiB. Closing registrations count until final cleanup; upload
+capacity is held through publication and the cleanup attempt. Refusal is an
+immediate JSON `503` with `registration_limit` or `upload_limit`, not a queue.
+
+The resulting 160 MiB active-payload bound excludes retained deliveries, failed
+temporary cleanup, and other process memory. Progress may continue beyond one
+idle interval; admission capacity still applies. Localpost never removes
+delivered files to recover space. Disk exhaustion is a delivery failure.
 
 ## First implementation verification
 

@@ -33,6 +33,7 @@ type messageHandler struct {
 	directory   string
 	idleTimeout time.Duration
 	mailbox     *registration
+	uploads     *uploadSlots
 	filename    func() string
 	storage     messageStorage
 }
@@ -88,6 +89,14 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "message body exceeds 10 MiB")
 		return
+	}
+	if h.uploads != nil {
+		if !h.uploads.acquire() {
+			abortMessageBody(w, controller)
+			writeAPIError(w, http.StatusServiceUnavailable, "upload_limit", "active upload limit reached")
+			return
+		}
+		defer h.uploads.release()
 	}
 	if err := controller.SetReadDeadline(time.Now().Add(h.idleTimeout)); err != nil {
 		abortMessageBody(w, controller)

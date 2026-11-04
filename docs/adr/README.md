@@ -22,8 +22,8 @@ These are not additional accepted requirements:
 - Remaining API refinements. Registration uses `POST /registrations`, removal
   uses `DELETE /registrations/{id}`, and mailbox delivery uses `POST /messages`;
   their contracts are documented in the README.
-- Concurrent-upload, registration, and aggregate temporary-storage limits; bounds
-  for uploads that keep making slow progress.
+- Broader qualification of the implemented registration/upload limits and
+  slow-progress behavior. Current fixed defaults are documented in the README.
 - Broader temporary-file recovery policy beyond best-effort cleanup.
 - Directory write-access verification and platform-specific atomic publication.
 - Operational logging that avoids recording payloads.

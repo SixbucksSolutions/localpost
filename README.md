@@ -145,7 +145,7 @@ readable `message`, for example:
 | `405` | `method_not_allowed` (with `Allow: POST`) |
 | `413` | `request_too_large` |
 | `415` | `unsupported_media_type` |
-| `503` | `unavailable` |
+| `503` | `unavailable` or `registration_limit` |
 
 A lost response does not undo an established registration. The admin port is
 for JSON control requests; mailbox payloads remain opaque bytes.
@@ -217,7 +217,20 @@ visibility. Consumers read only final `localpost_[UUIDv7].dat` names.
 Message errors use the same JSON envelope as registration errors: `400`
 `invalid_request`, `404` `not_found`, `405` `method_not_allowed`, `408`
 `request_timeout`, `413` `request_too_large`, `415` `unsupported_media_type`, or
-`500` `delivery_failed`.
+`500` `delivery_failed`, or `503` `upload_limit` / `unavailable`.
+
+## Resource limits
+
+The fixed defaults are **64 live registrations** and **16 active uploads across
+all mailboxes**. Closing registrations keep their place until cleanup finishes.
+An upload keeps its place through publication and its temporary-file cleanup
+attempt. Saturation returns HTTP `503` with `registration_limit` or `upload_limit`;
+localpost does not queue or retry the request.
+
+With the 10 MiB message limit, the 16 admitted uploads account for at most
+160 MiB of active payload. This is not a limit on all process memory, retained
+deliveries, or temporary files left after failed cleanup. Delivered-file retention
+remains the agent's responsibility. No extra runtime configuration is required.
 
 ## Browser CORS
 

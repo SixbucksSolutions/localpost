@@ -36,15 +36,17 @@ type registration struct {
 }
 
 type registry struct {
-	mu            sync.Mutex
-	gracePeriod   time.Duration
-	closed        bool
-	registrations map[string]*registration
-	listen        func(string, string) (net.Listener, error)
+	mu                sync.Mutex
+	gracePeriod       time.Duration
+	registrationLimit int
+	uploads           *uploadSlots
+	closed            bool
+	registrations     map[string]*registration
+	listen            func(string, string) (net.Listener, error)
 }
 
 func newRegistry() *registry {
-	return &registry{registrations: make(map[string]*registration), listen: net.Listen, gracePeriod: 30 * time.Second}
+	return &registry{registrations: make(map[string]*registration), listen: net.Listen, gracePeriod: 30 * time.Second, registrationLimit: defaultRegistrationLimit, uploads: newUploadSlots(defaultUploadLimit)}
 }
 
 func (r *registry) register(directory string) (*registration, error) {
@@ -52,6 +54,9 @@ func (r *registry) register(directory string) (*registration, error) {
 	defer r.mu.Unlock()
 	if r.closed {
 		return nil, errors.New("registration service is stopping")
+	}
+	if len(r.registrations) >= r.registrationLimit {
+		return nil, errRegistrationLimit
 	}
 	listener, err := r.listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -73,6 +78,7 @@ func (r *registry) register(directory string) (*registration, error) {
 	}
 	handler := newMessageHandler(directory)
 	handler.mailbox = mailbox
+	handler.uploads = r.uploads
 	mailbox.server = &http.Server{Handler: withCORS(handler, "POST, OPTIONS"), ReadHeaderTimeout: 5 * time.Second}
 	r.registrations[id] = mailbox
 	go r.serveMailbox(mailbox)
@@ -149,11 +155,15 @@ func (r *registry) startStop(mailbox *registration) {
 func (r *registry) drain(mailbox *registration) {
 	ctx, cancel := context.WithTimeout(context.Background(), r.gracePeriod)
 	defer cancel()
-	// Close explicitly to cover a goroutine that has not entered Serve yet.
-	_ = mailbox.listener.Close()
+	// Let Shutdown own the tracked listener close. Closing it first can make
+	// Shutdown report net.ErrClosed while Serve is still removing its listener,
+	// incorrectly marking an otherwise graceful drain as forced.
 	if err := mailbox.server.Shutdown(ctx); err != nil {
 		mailbox.force()
 	}
+	// Shutdown cannot track a listener before Serve starts. Release that
+	// allocation too; the shutdown flag prevents a later Serve from using it.
+	_ = mailbox.listener.Close()
 	// Close interrupts body reads. Wait for their deferred temporary-file cleanup
 	// before reporting completion or releasing ownership of the mapping.
 	<-mailbox.drained
@@ -254,32 +264,43 @@ func validateDirectory(directory string) error {
 }
 
 func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	controller := http.NewResponseController(w)
 	if id, ok := strings.CutPrefix(request.URL.Path, "/registrations/"); ok && id != "" && !strings.Contains(id, "/") {
 		if request.Method != http.MethodDelete {
+			abortMessageBody(w, controller)
 			w.Header().Set("Allow", http.MethodDelete)
 			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method must be DELETE")
 			return
 		}
-		abortMessageBody(w, http.NewResponseController(w))
+		abortMessageBody(w, controller)
 		r.unregister(w, id)
 		return
 	}
 	if request.URL.Path != "/registrations" {
+		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusNotFound, "not_found", "404 page not found")
 		return
 	}
 	if request.Method != http.MethodPost {
+		abortMessageBody(w, controller)
 		w.Header().Set("Allow", http.MethodPost)
 		writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method must be POST")
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(request.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {
+		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
+		return
+	}
+	if request.ContentLength > registrationBodyLimit {
+		abortMessageBody(w, controller)
+		writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "registration body exceeds 64 KiB")
 		return
 	}
 	body, err := io.ReadAll(http.MaxBytesReader(w, request.Body, registrationBodyLimit))
 	if err != nil {
+		abortMessageBody(w, controller)
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
 			writeAPIError(w, http.StatusRequestEntityTooLarge, "request_too_large", "registration body exceeds 64 KiB")
@@ -306,6 +327,10 @@ func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		return
 	}
 	mailbox, err := r.register(input.Directory)
+	if errors.Is(err, errRegistrationLimit) {
+		writeAPIError(w, http.StatusServiceUnavailable, "registration_limit", "live registration limit reached")
+		return
+	}
 	if err != nil {
 		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "mailbox allocation unavailable")
 		return
