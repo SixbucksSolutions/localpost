@@ -12,8 +12,16 @@ try {
 
     $goRoot = & go env GOROOT
     if ($LASTEXITCODE -ne 0) { throw 'Unable to locate the pinned Go toolchain.' }
-    $unformatted = & (Join-Path $goRoot 'bin/gofmt.exe') -l .
-    if ($LASTEXITCODE -ne 0) { throw 'gofmt failed.' }
+    # Independent worktrees and cached tools are not this checkout's source.
+    $goFiles = Get-ChildItem -LiteralPath $repoRoot -Recurse -File -Filter '*.go' |
+        Where-Object {
+            $_.Name -notlike '.*' -and
+            [System.IO.Path]::GetRelativePath($repoRoot, $_.FullName) -notmatch '^(\.git|\.tools|\.worktrees|bin)[\\/]'
+        }
+    $unformatted = foreach ($file in $goFiles) {
+        & (Join-Path $goRoot 'bin/gofmt.exe') -l $file.FullName
+        if ($LASTEXITCODE -ne 0) { throw 'gofmt failed.' }
+    }
     if ($unformatted) { throw "Go files require formatting: $unformatted" }
 
     $lintVersion = (Get-Content (Join-Path $repoRoot '.golangci-version') -Raw).Trim()

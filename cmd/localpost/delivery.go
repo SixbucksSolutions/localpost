@@ -18,11 +18,23 @@ const messageIdleTimeout = 30 * time.Second
 
 var errMessageStorage = errors.New("message storage failure")
 
+type messageFile interface {
+	io.WriteCloser
+	Name() string
+}
+
+type messageStorage struct {
+	createTemp func(string, string) (messageFile, error)
+	link       func(string, string) error
+	remove     func(string) error
+}
+
 type messageHandler struct {
 	directory   string
 	idleTimeout time.Duration
 	mailbox     *registration
 	filename    func() string
+	storage     messageStorage
 }
 
 type messageReceipt struct {
@@ -35,6 +47,13 @@ func newMessageHandler(directory string) *messageHandler {
 		directory:   directory,
 		idleTimeout: messageIdleTimeout,
 		filename:    func() string { return "localpost_" + uuid.NewV7().String() + ".dat" },
+		storage: messageStorage{
+			createTemp: func(directory, pattern string) (messageFile, error) {
+				return os.CreateTemp(directory, pattern)
+			},
+			link:   os.Link,
+			remove: os.Remove,
+		},
 	}
 }
 
@@ -76,7 +95,7 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 		return
 	}
 
-	file, err := os.CreateTemp(h.directory, ".localpost-upload-*")
+	file, err := h.storage.createTemp(h.directory, ".localpost-upload-*")
 	if err != nil {
 		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusInternalServerError, "delivery_failed", "unable to create message file")
@@ -84,7 +103,7 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 	}
 	// Cleanup is best effort. A published message remains successful even if the
 	// temporary hard link cannot be removed; it must not invite a duplicate retry.
-	defer func() { _ = os.Remove(file.Name()) }()
+	defer func() { _ = h.storage.remove(file.Name()) }()
 	size, readErr := copyMessage(file, http.MaxBytesReader(w, request.Body, messageBodyLimit), controller, h.idleTimeout)
 	closeErr := file.Close()
 	if readErr != nil {
@@ -130,7 +149,7 @@ func (h *messageHandler) publish(temporary, filename string) error {
 			return errors.New("mailbox was forcibly stopped")
 		}
 	}
-	return os.Link(temporary, filepath.Join(h.directory, filename))
+	return h.storage.link(temporary, filepath.Join(h.directory, filename))
 }
 
 // abortMessageBody bounds net/http's implicit request-body cleanup as well as
