@@ -1,0 +1,13 @@
+{
+  "name": "localpost-contract-checks",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check:openapi": "node scripts/validate-openapi.mjs",
+    "test:openapi": "node --test scripts/validate-openapi.test.mjs"
+  },
+  "devDependencies": {
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1"
+  }
+}

@@ -21,6 +21,12 @@ strict but useful: do not enable all linters, add arbitrary size/style quotas,
 blanket-exclude tests, or suppress findings merely to obtain a green result.
 Fix substantive issues; explain any narrow intentional error discard or exception.
 
+Install pinned OpenAPI validation development dependencies with
+`npm ci --ignore-scripts --no-audit --no-fund`. The normal check includes contract
+validation and its tests; `-ServiceUrl http://127.0.0.1:53147` additionally checks
+an existing shared daemon using only temporary owned registrations. Preserve
+official schema snapshots and their recorded provenance when updating tooling.
+
 Keep control APIs REST-oriented and JSON-based, including structured application
 errors with stable codes. Message-upload bodies remain opaque bytes; do not wrap
 or rewrite them to apply the control API's JSON conventions.

@@ -1,3 +1,5 @@
+param([string]$ServiceUrl)
+
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $previousToolchain = $env:GOTOOLCHAIN
@@ -49,6 +51,14 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Browser pilot syntax check failed.' }
     & node --test examples/browser-diagnostics/pilot.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Browser pilot tests failed.' }
+    & node scripts/validate-openapi.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation failed. Run npm ci if dependencies are missing.' }
+    & node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation tests failed.' }
+    if ($ServiceUrl) {
+        & node scripts/check-openapi-service.mjs $ServiceUrl
+        if ($LASTEXITCODE -ne 0) { throw 'Live OpenAPI service checks failed.' }
+    }
 
     & go test ./...
     if ($LASTEXITCODE -ne 0) { throw 'go test failed.' }

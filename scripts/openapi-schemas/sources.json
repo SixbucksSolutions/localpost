@@ -1,0 +1,27 @@
+[
+  {
+    "sha256": "9df52b98a92075a917125364d23a5f70825d6c292c7aeb15c31b822e95f031e9",
+    "url": "https://spec.openapis.org/oas/3.2/schema-base/2026-08-30",
+    "file": "base.json"
+  },
+  {
+    "sha256": "ec53db6e114b768ff2d273b232bda210f51b70c5e57d57ac8daf7e8496a6e073",
+    "url": "https://spec.openapis.org/oas/3.2/schema/2026-08-30",
+    "file": "schema.json"
+  },
+  {
+    "sha256": "9375b7042aa0b01848403f0a9ebf12a3425e01a9e24337ce12624f10fea73833",
+    "url": "https://spec.openapis.org/oas/3.2/dialect/2026-02-26",
+    "file": "dialect.json"
+  },
+  {
+    "sha256": "f444d02ef7d36f30293983fad8118c823a3c70a49a8e5aa6f1afe21215e35417",
+    "url": "https://spec.openapis.org/oas/3.2/meta/2026-02-26",
+    "file": "meta.json"
+  },
+  {
+    "sha256": "4948367c65e1ce06690e2cadc6e86fce1a6a6db55ef874ce4b78c0f472ce5f13",
+    "url": "https://raw.githubusercontent.com/OAI/OpenAPI-Specification/main/LICENSE",
+    "file": "LICENSE"
+  }
+]

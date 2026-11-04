@@ -9,6 +9,10 @@ on:
       - .node-version
       - 'examples/**'
       - scripts/check.ps1
+      - 'scripts/**'
+      - openapi.json
+      - package.json
+      - package-lock.json
       - .github/workflows/race.yml
   pull_request:
     paths:
@@ -18,6 +22,10 @@ on:
       - .node-version
       - 'examples/**'
       - scripts/check.ps1
+      - 'scripts/**'
+      - openapi.json
+      - package.json
+      - package-lock.json
       - .github/workflows/race.yml
   workflow_dispatch:
 
@@ -55,6 +63,38 @@ jobs:
         run: |
           node --check examples/browser-diagnostics/pilot.mjs
           node --test examples/browser-diagnostics/pilot.test.mjs
+      - name: Validate OpenAPI contract
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node scripts/validate-openapi.mjs
+          node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs
+      - name: Check live service contract
+        run: |
+          go build -o "$RUNNER_TEMP/localpost-contract" ./cmd/localpost
+          "$RUNNER_TEMP/localpost-contract" --port 53149 >"$RUNNER_TEMP/localpost-contract.log" 2>&1 &
+          service_pid=$!
+          trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
+          service_ready=0
+          for _ in {1..30}; do
+            if ! kill -0 "$service_pid" 2>/dev/null; then
+              cat "$RUNNER_TEMP/localpost-contract.log"
+              echo 'Contract-test daemon exited before readiness.' >&2
+              exit 1
+            fi
+            if grep -q 'localpost listening on http://127.0.0.1:53149' "$RUNNER_TEMP/localpost-contract.log" &&
+               curl --silent --output /dev/null --connect-timeout 1 http://127.0.0.1:53149/; then
+              service_ready=1
+              break
+            fi
+            sleep 0.1
+          done
+          if test "$service_ready" != 1; then
+            cat "$RUNNER_TEMP/localpost-contract.log"
+            echo 'Contract-test daemon did not become ready.' >&2
+            exit 1
+          fi
+          kill -0 "$service_pid"
+          node scripts/check-openapi-service.mjs http://127.0.0.1:53149
       - name: Run race-instrumented tests
         run: go test -race -count=3 -timeout=5m ./...
       - name: Vet source

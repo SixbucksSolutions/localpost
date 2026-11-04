@@ -2,6 +2,8 @@
 
 A localhost post office for agents.
 
+**API reference: [OpenAPI 3.2.1 contract](openapi.json).**
+
 localpost is one shared service that receives HTTP POST bodies and delivers them
 unchanged as files in an agent-selected directory. An agent registers a mailbox,
 gets a UUIDv4 identity on the shared listener, and reads the resulting files with
@@ -10,8 +12,8 @@ its normal filesystem tools.
 **Status:** the Go executable, shared loopback listener, mailbox registration,
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. The browser pilot
-has completed a headless Chrome feedback-loop proof on Windows. OpenAPI
-documentation and release packaging remain in M05-M06.
+has completed a headless Chrome feedback-loop proof on Windows. Its OpenAPI
+contract is available above; release packaging remains in M06.
 The M03 API uses one listener and UUIDv4-addressed registrations; the old
 per-registration ports are removed.
 
@@ -50,6 +52,7 @@ once, then run the complete check:
 
 ```powershell
 ./scripts/install-tools.ps1
+npm ci --ignore-scripts --no-audit --no-fund
 ./scripts/check.ps1
 ./bin/localpost.exe --help
 ```
@@ -58,9 +61,10 @@ The current development check runs on Windows with PowerShell 7. A Go installati
 must be available; Go may download the selected toolchain if it is not installed.
 The built executable does not require a Go installation to run.
 
-The browser pilot's development checks also use Node **26.13.0**, pinned in
-`.node-version`, with its built-in test runner and no npm dependencies. Node is
-not required to run the localpost daemon.
+Development checks also use Node **26.13.0**, pinned in `.node-version`. The
+browser pilot uses its built-in test runner; pinned npm development dependencies
+validate the OpenAPI contract. Node and those dependencies are not required to
+run the localpost daemon.
 
 The tool installer downloads the official Windows x64 linter release, verifies
 its published SHA256 checksum, and keeps it under ignored `.tools/`. It does not
@@ -104,6 +108,29 @@ CI runs those tests alongside Go race verification. The pilot serves static
 assets on a separate loopback port and sends diagnostics to the shared daemon;
 it does not write diagnostic files or start a replacement service. The example's
 README records the M04.02 headless-browser evidence and its limits.
+
+### Validate the API contract
+
+The normal check validates [openapi.json](openapi.json) against versioned official
+OAS 3.2 schema snapshots, resolves references, and checks modeled JSON examples.
+The opaque upload bodies deliberately have no JSON schema. Validation tooling
+tests include rejected malformed documents; this is not a claim that every
+third-party OpenAPI renderer supports every OAS 3.2 feature.
+The [schema and validator notes](scripts/openapi-schemas/README.md) record the
+pinned sources, fixed-dialect compatibility binding, and supported reference
+scope. Unsupported external or dynamic application-schema references fail
+explicitly rather than being treated as validated.
+
+To also check an already-running localpost service with temporary, isolated
+registrations and files:
+
+```powershell
+./scripts/check.ps1 -ServiceUrl http://127.0.0.1:53147
+```
+
+This leaves the shared daemon running. CI runs the same service check against
+its own temporary daemon. The canonical contract is maintained in one place;
+these README examples explain its use rather than defining a second contract.
 
 ### Run
 

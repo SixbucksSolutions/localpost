@@ -5,3 +5,7 @@ LICENSE text eol=lf
 go.mod text eol=lf
 .go-version text eol=lf
 *.ps1 text eol=lf
+
+# Validation snapshots are integrity-checked against upstream bytes.
+scripts/openapi-schemas/*.json -text
+scripts/openapi-schemas/LICENSE -text
