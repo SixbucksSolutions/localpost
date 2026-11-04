@@ -10,7 +10,10 @@ filesystem tools.
 **Status:** the Go executable, loopback admin listener, mailbox registration,
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. A real-browser
-demonstration and release packaging remain in M03-M04.
+demonstration and release packaging remain in M04-M05. The planned M03 refactor
+will replace the current per-registration listeners with one shared listener
+and UUIDv4-addressed registrations; the API examples below describe the current
+implemented behavior until that refactor lands.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -264,7 +267,7 @@ if (!response.ok) throw new Error(receipt.error.message);
 
 The core HTTP checks cover preflights, error headers, file delivery, removal,
 and sibling isolation. They are not a real-browser demonstration; that remains
-M03. An application's CSP and the browser's local-network permissions still apply.
+M04. An application's CSP and the browser's local-network permissions still apply.
 
 ## Delivery contract
 
