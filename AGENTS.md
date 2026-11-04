@@ -25,6 +25,21 @@ Keep control APIs REST-oriented and JSON-based, including structured application
 errors with stable codes. Message-upload bodies remain opaque bytes; do not wrap
 or rewrite them to apply the control API's JSON conventions.
 
+## Shared daemon ownership
+
+This localpost development chat owns keeping the shared localpost daemon running.
+Terry clarified this on 2026-11-04. Check the loopback listener and owned process
+before starting another instance; investigate unexpected absence or exit and
+restore service. Do not ask Terry to start it as though this chat were an external
+client project.
+
+Keep daemon ownership metadata and stdout/stderr logs under the private runtime
+directory listed below. The default listener is `127.0.0.1:53147`. Verify service
+with an HTTP request and, when needed, an isolated registration/delivery/teardown
+probe. Preserve the shared daemon when a pilot or proof run ends; stop only owned
+temporary pilot processes and retire their registrations. Other client projects
+still report unavailable localpost instead of launching substitute collectors.
+
 ## Development board
 
 Use the shared localswim implementation at `C:\Projects\localswim`.

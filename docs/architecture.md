@@ -2,8 +2,8 @@
 
 **Status:** one-listener architecture. The executable, UUID-addressed mailbox
 registration, message delivery, unregistration, and browser CORS are implemented.
-Bounded robustness qualification accompanies the core. The real-browser
-demonstration remains a later milestone.
+Bounded robustness qualification accompanies the core. A headless Chrome pilot
+has also exercised the browser-to-file diagnostic feedback loop on Windows.
 Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
@@ -200,5 +200,7 @@ The implementation should establish these properties before release:
 - Restart restores no registrations; the listener stays unprivileged and loopback-only.
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
-concurrency qualification tests, plus a Linux race-instrumented CI run. Packaging,
-release-platform scope, and real-browser demonstration remain later work.
+concurrency qualification tests, plus a Linux race-instrumented CI run. Packaging
+and release-platform scope remain later work. The
+[browser pilot](../examples/browser-diagnostics/README.md) records its verified
+headless Chrome workflow; it does not establish cross-browser coverage.

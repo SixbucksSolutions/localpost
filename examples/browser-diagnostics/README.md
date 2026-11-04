@@ -3,8 +3,8 @@
 This development-only example serves a synthetic **Add one** counter. It uses
 the existing localpost daemon to deliver bounded JSON diagnostics. It contains
 no collector, file writer, daemon launcher, dependency install, or background
-watcher. The real-browser fault/fix demonstration belongs to M04.02; the checked-in
-example and automated checks alone do not establish that proof.
+watcher. The checked-in example and unit tests alone do not establish a browser
+proof; the completed M04.02 run is summarized below.
 
 ## Prepare and run
 
@@ -105,3 +105,35 @@ Node uses built-in modules only; the repository check pins the supported version
 Tests cover schema/config bounds, exact body projection, the wrong delta,
 transport isolation, timeout abort, one-send behavior, run limits, stale results,
 and the static server allowlist. They do not exercise a real browser.
+
+## Verified browser workflow
+
+On 2026-11-04, the pilot completed a real-browser run using installed Chrome
+156.0.8078.80 on Windows, in headless mode through Playwright Core 1.64.1.
+The pilot origin was `http://127.0.0.1:53148`; the existing shared daemon listened
+on `http://127.0.0.1:53147`. Fresh browser contexts used the ordinary browser
+CORS checks, with no custom CORS or CSP bypass flags.
+
+| Phase | Browser observation | File observation |
+| --- | --- | --- |
+| Preflight | Cross-origin `OPTIONS` returned `204` | No delivery files |
+| Controlled fault | One click produced count `2`; POST returned `200` | One record: expected `1`, observed `2`, `mismatch` |
+| Correction | Restored step `1`, rebuilt/restarted, one click produced `1` | New run: expected `1`, observed `1`, `match` |
+| Retired mailbox | POST returned `404`; the counter still advanced once | Both prior files unchanged; no new delivery |
+
+For each successful click, the recorded browser POST body matched its delivered
+file exactly. Browser network records showed the automatic JSON preflight with
+`Access-Control-Request-Method: POST` and `Access-Control-Request-Headers:
+content-type`, plus the daemon's wildcard CORS response. Run IDs and action
+sequences correlated screenshots, requests and files.
+
+The fault and correction were made in a private copy; the accepted source stayed
+at step `1`. The corrected copy's module hash matched the accepted source.
+Private screenshots, request metadata, payloads and the run harness were retained
+outside this repository. The temporary pilot and browser processes were closed,
+the registration was retired, and the shared daemon was left running.
+
+The packaged interactive UI tools could not initialize in that session, so this
+is a headless Chrome proof, not a headed-browser or cross-browser claim. No
+interactive local-network permission prompt was observed. Other browser or
+application permission/CSP policies still need their own verification.

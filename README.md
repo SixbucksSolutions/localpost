@@ -9,8 +9,9 @@ its normal filesystem tools.
 
 **Status:** the Go executable, shared loopback listener, mailbox registration,
 message delivery, unregistration, and permissive CORS are implemented. Bounded
-robustness checks and race-test automation accompany the core. A real-browser
-demonstration, OpenAPI documentation, and release packaging remain in M04-M06.
+robustness checks and race-test automation accompany the core. The browser pilot
+has completed a headless Chrome feedback-loop proof on Windows. OpenAPI
+documentation and release packaging remain in M05-M06.
 The M03 API uses one listener and UUIDv4-addressed registrations; the old
 per-registration ports are removed.
 
@@ -95,14 +96,14 @@ qualification tests also check mailbox isolation, capacity recovery, preserved
 files, and cleanup across repeated concurrent lifecycle cycles.
 Shared-listener coverage includes invalid and retired IDs, connection reuse,
 rejection/preflight body cleanup, and overlapping mailbox deletion with process
-shutdown. These are HTTP tests; the real-browser demonstration remains in M04.
+shutdown. These HTTP tests are separate from the recorded browser pilot proof.
 
 The same check runs syntax and behavior tests for the
 [development-only browser diagnostics pilot](examples/browser-diagnostics/README.md).
 CI runs those tests alongside Go race verification. The pilot serves static
 assets on a separate loopback port and sends diagnostics to the shared daemon;
-it does not write diagnostic files or start a replacement service. Real-browser
-feedback-loop evidence remains M04.02.
+it does not write diagnostic files or start a replacement service. The example's
+README records the M04.02 headless-browser evidence and its limits.
 
 ### Run
 
@@ -277,8 +278,9 @@ if (!response.ok) throw new Error(receipt.error.message);
 ```
 
 The core HTTP checks cover preflights, error headers, file delivery, removal,
-and sibling isolation. They are not a real-browser demonstration; that remains
-M04. An application's CSP and the browser's local-network permissions still apply.
+and sibling isolation. The separate browser pilot records a headless Chrome
+demonstration of the diagnostic feedback loop. An application's CSP and the
+browser's local-network permissions still apply.
 
 ## Delivery contract
 
