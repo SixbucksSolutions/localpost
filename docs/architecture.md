@@ -1,7 +1,7 @@
 # High-level architecture
 
-**Status:** target architecture. M01.01 implements the executable and admin
-listener foundation; mailbox registration and delivery remain unimplemented.
+**Status:** target architecture. The executable, admin listener, and mailbox
+registration are implemented; message delivery and unregistration remain unimplemented.
 Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
@@ -60,8 +60,18 @@ A failed registration leaves no active mailbox. Registration-time checking does
 not guarantee later writes: the directory can disappear or become unwritable.
 Each delivery must report its actual outcome.
 
-The exact route names, request/response schemas, registration identity format,
-and write-access checking mechanism remain implementation decisions.
+The implemented registration route is `POST /registrations`, with a JSON object
+containing `directory`. It returns HTTP `200` with `id` and `port` after binding
+the mailbox listener. Application errors use a JSON `error` object with stable
+`code` and readable `message`. The control API is JSON; message bodies stay opaque.
+The registration identity is an opaque value for callers.
+
+The admin request is bounded to 64 KiB, with a 30-second headers-and-body read
+budget. This does not impose a deadline on filesystem operations. Directory
+validation creates, closes,
+and removes a temporary probe before accepting the registration; it never
+creates the directory or alters permissions. Future admin routes and the message
+upload path remain to be selected by their implementation stories.
 
 ## Receiving and publishing a message
 

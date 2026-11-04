@@ -7,9 +7,9 @@ unchanged as files in an agent-selected directory. An agent registers a mailbox,
 gets a dedicated listening port, and reads the resulting files with its normal
 filesystem tools.
 
-**Status:** M01.01 implements the Go executable and loopback admin listener.
-Mailbox registration, message delivery, and their API routes are not implemented
-yet. The delivery workflow and contract below describe the target service.
+**Status:** the Go executable, loopback admin listener, and mailbox registration
+are implemented. Message delivery and unregistration are not implemented yet.
+The delivery workflow and contract below describe the target service.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -88,14 +88,65 @@ The operator can start the foundation with:
 ./bin/localpost.exe --port 53148    # Override the admin port
 ```
 
-Stop it with Ctrl+C. Until the mailbox stories are implemented, HTTP requests
-receive a not-found response; there is no registration or upload endpoint yet.
-The startup message confirms the bound address. Full release packaging belongs
-to a later milestone.
+Stop it with Ctrl+C. The startup message confirms the bound address. Registration
+is available on the admin port; each allocated mailbox returns not found until
+message delivery is implemented. Full release packaging belongs to a later milestone.
 
 There is no configuration file. The admin listener and all mailbox listeners
 will use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
 to fail clearly; localpost does not silently choose a different admin port.
+
+## Registration API
+
+The control API uses JSON for requests, success responses, and application errors.
+Register an existing absolute directory with `POST /registrations` on the admin
+port. The caller creates the directory and arranges its permissions:
+
+```powershell
+$inbox = Join-Path $env:TEMP 'localpost-inbox'
+New-Item -ItemType Directory -Force -Path $inbox | Out-Null
+$body = @{ directory = $inbox } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri http://127.0.0.1:53147/registrations `
+    -ContentType application/json -Body $body
+```
+
+A successful registration returns HTTP `200` with the assigned identity and port:
+
+```json
+{"id":"opaque-registration-id","port":54321}
+```
+
+The port is already bound on `127.0.0.1` before success is returned. The identity
+is opaque to callers. Multiple registrations remain independent, and all are
+forgotten when the daemon exits. Stopping the daemon closes their listeners.
+
+localpost checks writability with a temporary probe file, which it closes and
+removes before accepting the directory. It does not create directories or change
+their permissions. A successful probe is not a guarantee that later writes will
+succeed.
+
+Registration requests accept one JSON object, at most 64 KiB, with media-type
+parameters such as `charset=utf-8` permitted. Reading the request headers and
+body has a 30-second budget; this is not a deadline for filesystem operations.
+Application errors return an `error` object containing a stable `code` and a
+readable `message`, for example:
+
+```json
+{"error":{"code":"invalid_directory","message":"directory must exist and be accessible"}}
+```
+
+| HTTP status | Error code |
+| --- | --- |
+| `400` | `invalid_request` or `invalid_directory` |
+| `404` | `not_found` |
+| `405` | `method_not_allowed` (with `Allow: POST`) |
+| `413` | `request_too_large` |
+| `415` | `unsupported_media_type` |
+| `503` | `unavailable` |
+
+A lost response does not undo an established registration. The admin port is
+for JSON control requests; mailbox payloads remain opaque bytes.
+CORS support for browser callers and the actual upload route are later M01 stories.
 
 ## Delivery contract
 

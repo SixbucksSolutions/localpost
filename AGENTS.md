@@ -21,6 +21,10 @@ strict but useful: do not enable all linters, add arbitrary size/style quotas,
 blanket-exclude tests, or suppress findings merely to obtain a green result.
 Fix substantive issues; explain any narrow intentional error discard or exception.
 
+Keep control APIs REST-oriented and JSON-based, including structured application
+errors with stable codes. Message-upload bodies remain opaque bytes; do not wrap
+or rewrite them to apply the control API's JSON conventions.
+
 ## Development board
 
 Use the shared localswim implementation at `C:\Projects\localswim`.

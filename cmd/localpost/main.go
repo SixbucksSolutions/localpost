@@ -52,14 +52,20 @@ func run(ctx context.Context, cfg config, output io.Writer) error {
 }
 
 func serve(ctx context.Context, listener net.Listener) error {
+	registrations := newRegistry()
+	defer registrations.close()
 	server := &http.Server{
-		Handler:           http.NotFoundHandler(),
+		Handler:           registrations,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
 	}
-	// Only this admin listener exists so far. Full mailbox draining belongs to
+	// Full mailbox draining belongs to
 	// the later lifecycle implementation; cancellation releases all connections.
 	// Cleanup errors cannot change the cancellation outcome.
-	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
+	stop := context.AfterFunc(ctx, func() {
+		registrations.close()
+		_ = server.Close()
+	})
 	defer stop()
 	defer func() { _ = server.Close() }()
 	if err := server.Serve(listener); err != nil {

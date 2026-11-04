@@ -19,7 +19,8 @@ These are not additional accepted requirements:
 
 - Release packaging and initially supported operating systems. Development uses
   Go 1.27.3 as recorded in `.go-version` and the README.
-- Exact admin and mailbox paths, schemas, identity format, and error codes.
+- Remaining admin and mailbox routes and schemas. Registration now uses
+  `POST /registrations`; the implemented JSON contract is documented in the README.
 - Media-type parameter policy and supported HTTP body framing/content encodings.
 - Concurrent-upload, registration, and aggregate temporary-storage limits; bounds
   for uploads that keep making slow progress.
