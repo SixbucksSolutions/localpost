@@ -52,26 +52,39 @@ func run(ctx context.Context, cfg config, output io.Writer) error {
 }
 
 func serve(ctx context.Context, listener net.Listener) error {
-	registrations := newRegistry()
+	return serveWithRegistry(ctx, listener, newRegistry())
+}
+
+func serveWithRegistry(ctx context.Context, listener net.Listener, registrations *registry) error {
 	defer registrations.close()
 	server := &http.Server{
 		Handler:           registrations,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 	}
-	// Full mailbox draining belongs to
-	// the later lifecycle implementation; cancellation releases all connections.
-	// Cleanup errors cannot change the cancellation outcome.
+	stopped := make(chan struct{})
 	stop := context.AfterFunc(ctx, func() {
-		registrations.close()
+		defer close(stopped)
+		grace, cancel := context.WithTimeout(context.Background(), registrations.gracePeriod)
+		defer cancel()
+		// Freeze every mailbox before closing admin connections. Existing uploads
+		// use their own connections and continue within the common grace budget.
+		mailboxes := registrations.stopAll()
+		_ = listener.Close()
 		_ = server.Close()
+		registrations.shutdown(grace)
+		for _, mailbox := range mailboxes {
+			<-mailbox.done
+		}
 	})
 	defer stop()
 	defer func() { _ = server.Close() }()
-	if err := server.Serve(listener); err != nil {
-		if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
-			return nil
-		}
+	err := server.Serve(listener)
+	if ctx.Err() != nil {
+		<-stopped
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("serve admin HTTP: %w", err)
 	}
 	return nil

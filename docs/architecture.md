@@ -1,7 +1,8 @@
 # High-level architecture
 
 **Status:** target architecture. The executable, admin listener, and mailbox
-registration and message delivery are implemented; unregistration remains unimplemented.
+registration, message delivery, and unregistration are implemented. Browser CORS
+remains for the final M01 story.
 Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
@@ -144,14 +145,22 @@ bytes to localpost; file publication remains centralized here.
 
 ## Unregistration and process lifecycle
 
-Unregistration stops accepting new uploads on that registration, allows already
-accepted uploads to finish within a bounded shutdown window, then closes the
-listener and removes the mapping. Any remaining incomplete upload is aborted
-without publishing a final file. The shutdown deadline will be at most 30 seconds;
-its precise interaction with the stalled-upload timer remains to be specified.
+`DELETE /registrations/{id}` stops accepting new uploads on that registration,
+allows accepted uploads to finish within a 30-second grace period, then closes
+the listener and removes the mapping. Remaining incomplete uploads are aborted
+without publishing final files. Upload progress does not extend that deadline.
+Concurrent callers share the active stop operation; a later request for a removed
+registration returns `404` with `registration_not_found`.
 
-Unregistration does not delete completed files. A normal process stop should
-likewise close listeners with bounded cleanup. A crash loses every registration;
+The success response is JSON with `id`, `unregistered: true`, and a `forced`
+Boolean indicating whether the grace deadline required interruption. Cleanup
+continues if the caller disconnects. Whole-process shutdown freezes registration
+and drains mailboxes together under one network deadline. Completion waits for
+local handler cleanup; operating-system filesystem calls are not covered by a
+hard real-time deadline.
+
+Unregistration does not delete completed files. A normal process stop likewise
+closes listeners with bounded network cleanup. A crash loses every registration;
 there is no restart recovery. Agents register again after a person restarts the
 daemon. Agents do not start it automatically or create a substitute collector.
 

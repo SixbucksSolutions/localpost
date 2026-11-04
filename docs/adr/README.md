@@ -19,11 +19,12 @@ These are not additional accepted requirements:
 
 - Release packaging and initially supported operating systems. Development uses
   Go 1.27.3 as recorded in `.go-version` and the README.
-- Remaining admin routes. Registration uses `POST /registrations` and mailbox
-  delivery uses `POST /messages`; their contracts are documented in the README.
+- Remaining API refinements. Registration uses `POST /registrations`, removal
+  uses `DELETE /registrations/{id}`, and mailbox delivery uses `POST /messages`;
+  their contracts are documented in the README.
 - Concurrent-upload, registration, and aggregate temporary-storage limits; bounds
   for uploads that keep making slow progress.
-- Exact shutdown timer behavior and broader temporary-file recovery policy.
+- Broader temporary-file recovery policy beyond best-effort cleanup.
 - Directory write-access verification and platform-specific atomic publication.
 - Operational logging that avoids recording payloads.
 

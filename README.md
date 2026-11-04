@@ -8,8 +8,8 @@ gets a dedicated listening port, and reads the resulting files with its normal
 filesystem tools.
 
 **Status:** the Go executable, loopback admin listener, mailbox registration,
-and message delivery are implemented. Unregistration and browser CORS support
-remain for later M01 stories.
+message delivery, and unregistration are implemented. Browser CORS support
+remains for the final M01 story.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -88,7 +88,9 @@ The operator can start the foundation with:
 ./bin/localpost.exe --port 53148    # Override the admin port
 ```
 
-Stop it with Ctrl+C. The startup message confirms the bound address. Registration
+Stop it with Ctrl+C. Shutdown stops new work, allows a shared grace period of up
+to 30 seconds, then interrupts unfinished requests. The startup message confirms
+the bound address. Registration
 is available on the admin port; each allocated mailbox accepts messages at
 `/messages`. Full release packaging belongs to a later milestone.
 
@@ -147,6 +149,37 @@ readable `message`, for example:
 A lost response does not undo an established registration. The admin port is
 for JSON control requests; mailbox payloads remain opaque bytes.
 CORS support for browser callers is a later M01 story.
+
+## Unregistration API
+
+Use `DELETE /registrations/{id}` on the admin port to retire one mailbox:
+
+```powershell
+Invoke-RestMethod -Method Delete `
+    -Uri "http://127.0.0.1:53147/registrations/$($mailbox.id)"
+```
+
+Successful completion returns JSON:
+
+```json
+{"id":"opaque-registration-id","unregistered":true,"forced":false}
+```
+
+The mailbox first stops accepting new uploads. Accepted uploads can finish
+during its 30-second grace period. After the deadline, remaining uploads are
+interrupted; `forced: true` indicates that this cutoff was needed. Progress does
+not extend the shutdown deadline. Completed `.dat` files remain untouched, and
+other mailboxes remain usable.
+
+Completion waits for local request cleanup. The 30 seconds bounds network drain,
+not operating-system filesystem calls that may take longer to return.
+
+Concurrent deletion requests for a mailbox that is still closing share its
+operation. Once the mailbox is gone, deletion returns HTTP `404` with
+`registration_not_found`. Disconnecting the deletion client does not cancel
+cleanup. Whole-daemon shutdown uses one shared deadline across its mailboxes,
+rather than granting 30 seconds to each in turn. All registrations disappear
+when the process exits.
 
 ## Message API
 

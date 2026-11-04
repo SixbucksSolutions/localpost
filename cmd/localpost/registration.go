@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,17 +26,25 @@ type registration struct {
 	directory string
 	listener  net.Listener
 	server    *http.Server
+
+	mu      *sync.Mutex
+	closing bool
+	forced  bool
+	active  int
+	drained chan struct{}
+	done    chan struct{}
 }
 
 type registry struct {
 	mu            sync.Mutex
+	gracePeriod   time.Duration
 	closed        bool
 	registrations map[string]*registration
 	listen        func(string, string) (net.Listener, error)
 }
 
 func newRegistry() *registry {
-	return &registry{registrations: make(map[string]*registration), listen: net.Listen}
+	return &registry{registrations: make(map[string]*registration), listen: net.Listen, gracePeriod: 30 * time.Second}
 }
 
 func (r *registry) register(directory string) (*registration, error) {
@@ -59,33 +69,163 @@ func (r *registry) register(directory string) (*registration, error) {
 	}
 	mailbox := &registration{
 		ID: id, Port: address.Port, directory: directory, listener: listener,
-		server: &http.Server{Handler: newMessageHandler(directory), ReadHeaderTimeout: 5 * time.Second},
+		mu: &sync.Mutex{}, drained: make(chan struct{}), done: make(chan struct{}),
 	}
+	handler := newMessageHandler(directory)
+	handler.mailbox = mailbox
+	mailbox.server = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
 	r.registrations[id] = mailbox
 	go r.serveMailbox(mailbox)
 	return mailbox, nil
 }
 
-func (r *registry) serveMailbox(mailbox *registration) {
-	// Shutdown and unexpected listener failure both relinquish this registration.
-	_ = mailbox.server.Serve(mailbox.listener)
-	_ = mailbox.server.Close()
-	_ = mailbox.listener.Close()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.registrations, mailbox.ID)
+// Admission and publication share this lock with the forced cutoff. A request
+// already admitted may finish during draining, but cannot publish after force.
+func (m *registration) admit() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closing {
+		return false
+	}
+	m.active++
+	return true
 }
 
-func (r *registry) close() {
+func (m *registration) finished() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.active--
+	if m.closing && m.active == 0 {
+		close(m.drained)
+	}
+}
+
+func (m *registration) freeze() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closing = true
+	if m.active == 0 {
+		close(m.drained)
+	}
+}
+
+func (m *registration) force() {
+	m.mu.Lock()
+	m.forced = true
+	m.mu.Unlock()
+	// Both closes are needed if Serve has not yet started.
+	_ = m.listener.Close()
+	_ = m.server.Close()
+}
+
+func (r *registry) serveMailbox(mailbox *registration) {
+	_ = mailbox.server.Serve(mailbox.listener)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	mailbox.mu.Lock()
+	closing := mailbox.closing
+	mailbox.mu.Unlock()
+	if !closing {
+		// An unexpected listener failure aborts existing connections. An
+		// intentional Shutdown also returns from Serve, but must keep draining.
+		r.startStop(mailbox)
+		mailbox.force()
+	}
+}
+
+// startStop is called under r.mu. The mapping remains owned until finalization,
+// so simultaneous DELETE requests join the same operation.
+func (r *registry) startStop(mailbox *registration) {
+	mailbox.mu.Lock()
+	closing := mailbox.closing
+	mailbox.mu.Unlock()
+	if closing {
+		return
+	}
+	mailbox.freeze()
+	go r.drain(mailbox)
+}
+
+func (r *registry) drain(mailbox *registration) {
+	ctx, cancel := context.WithTimeout(context.Background(), r.gracePeriod)
+	defer cancel()
+	// Close explicitly to cover a goroutine that has not entered Serve yet.
+	_ = mailbox.listener.Close()
+	if err := mailbox.server.Shutdown(ctx); err != nil {
+		mailbox.force()
+	}
+	// Close interrupts body reads. Wait for their deferred temporary-file cleanup
+	// before reporting completion or releasing ownership of the mapping.
+	<-mailbox.drained
+	r.mu.Lock()
+	delete(r.registrations, mailbox.ID)
+	close(mailbox.done)
+	r.mu.Unlock()
+}
+
+func (r *registry) stopAll() []*registration {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.closed = true
-	for id, mailbox := range r.registrations {
-		// Closing both also covers shutdown before Serve starts in its goroutine.
-		_ = mailbox.listener.Close()
-		_ = mailbox.server.Close()
-		delete(r.registrations, id)
+	mailboxes := make([]*registration, 0, len(r.registrations))
+	for _, mailbox := range r.registrations {
+		r.startStop(mailbox)
+		mailboxes = append(mailboxes, mailbox)
 	}
+	return mailboxes
+}
+
+func (r *registry) shutdown(ctx context.Context) {
+	mailboxes := r.stopAll()
+	// The shared deadline also caps DELETE operations already draining.
+	stop := context.AfterFunc(ctx, func() {
+		for _, mailbox := range mailboxes {
+			select {
+			case <-mailbox.done:
+			default:
+				mailbox.force()
+			}
+		}
+	})
+	defer stop()
+	for _, mailbox := range mailboxes {
+		<-mailbox.done
+	}
+}
+
+// close is the immediate cleanup path for tests and unrecoverable failures.
+func (r *registry) close() {
+	mailboxes := r.stopAll()
+	for _, mailbox := range mailboxes {
+		mailbox.force()
+	}
+	for _, mailbox := range mailboxes {
+		<-mailbox.done
+	}
+}
+
+func (r *registry) unregister(w http.ResponseWriter, id string) {
+	r.mu.Lock()
+	mailbox := r.registrations[id]
+	if mailbox != nil {
+		r.startStop(mailbox)
+	}
+	r.mu.Unlock()
+	if mailbox == nil {
+		writeAPIError(w, http.StatusNotFound, "registration_not_found", "registration not found")
+		return
+	}
+	<-mailbox.done
+	mailbox.mu.Lock()
+	forced := mailbox.forced
+	mailbox.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	// Caller disconnection does not cancel the owned cleanup operation.
+	_ = json.NewEncoder(w).Encode(struct {
+		ID           string `json:"id"`
+		Unregistered bool   `json:"unregistered"`
+		Forced       bool   `json:"forced"`
+	}{mailbox.ID, true, forced})
 }
 
 func validateDirectory(directory string) error {
@@ -114,6 +254,16 @@ func validateDirectory(directory string) error {
 }
 
 func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	if id, ok := strings.CutPrefix(request.URL.Path, "/registrations/"); ok && id != "" && !strings.Contains(id, "/") {
+		if request.Method != http.MethodDelete {
+			w.Header().Set("Allow", http.MethodDelete)
+			writeAPIError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method must be DELETE")
+			return
+		}
+		abortMessageBody(w, http.NewResponseController(w))
+		r.unregister(w, id)
+		return
+	}
 	if request.URL.Path != "/registrations" {
 		writeAPIError(w, http.StatusNotFound, "not_found", "404 page not found")
 		return

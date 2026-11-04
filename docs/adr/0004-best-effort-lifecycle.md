@@ -29,3 +29,11 @@ implementation.
 persistent service recovery. Agents register again after a restart and own
 delivered-file retention. A crash can interrupt requests without a response.
 Normal shutdown should perform bounded cleanup without claiming crash recovery.
+
+## Implementation note (M01.04)
+
+The grace period is 30 seconds and does not extend when uploads make progress.
+Whole-process shutdown shares one deadline across mailboxes. At cutoff, new
+publication is prevented and remaining connections are closed. Completion waits
+for admitted handlers to finish local cleanup; this network grace budget is not
+a hard deadline for operating-system filesystem calls.

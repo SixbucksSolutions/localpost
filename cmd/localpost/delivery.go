@@ -21,6 +21,7 @@ var errMessageStorage = errors.New("message storage failure")
 type messageHandler struct {
 	directory   string
 	idleTimeout time.Duration
+	mailbox     *registration
 	filename    func() string
 }
 
@@ -39,6 +40,14 @@ func newMessageHandler(directory string) *messageHandler {
 
 func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 	controller := http.NewResponseController(w)
+	if h.mailbox != nil {
+		if !h.mailbox.admit() {
+			abortMessageBody(w, controller)
+			writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "mailbox is stopping")
+			return
+		}
+		defer h.mailbox.finished()
+	}
 	if request.URL.Path != "/messages" {
 		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusNotFound, "not_found", "404 page not found")
@@ -104,13 +113,24 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 	filename := h.filename()
 	// Linking a closed, complete file publishes atomically and never replaces an
 	// existing destination. Unsupported filesystems fail rather than weakening it.
-	if err := os.Link(file.Name(), filepath.Join(h.directory, filename)); err != nil {
+	if err := h.publish(file.Name(), filename); err != nil {
 		writeAPIError(w, http.StatusInternalServerError, "delivery_failed", "unable to publish message file")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
 	// Losing the response cannot undo a successfully published message.
 	_ = json.NewEncoder(w).Encode(messageReceipt{Filename: filename, Bytes: size})
+}
+
+func (h *messageHandler) publish(temporary, filename string) error {
+	if h.mailbox != nil {
+		h.mailbox.mu.Lock()
+		defer h.mailbox.mu.Unlock()
+		if h.mailbox.forced {
+			return errors.New("mailbox was forcibly stopped")
+		}
+	}
+	return os.Link(temporary, filepath.Join(h.directory, filename))
 }
 
 // abortMessageBody bounds net/http's implicit request-body cleanup as well as
