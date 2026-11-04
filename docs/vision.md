@@ -76,8 +76,9 @@ and exactly-once delivery are also outside this version's agreed scope.
 ## Current stage
 
 The current foundation provides a Go executable, loopback admin listener, and
-JSON mailbox registration. Message delivery and unregistration are still to be
-implemented; there is no packaged release yet. **Go is the selected implementation language**, as recorded
+JSON mailbox registration and opaque message delivery. Unregistration and browser
+CORS support are still to be implemented; there is no packaged release yet.
+**Go is the selected implementation language**, as recorded
 in [ADR 0006](adr/0006-go-implementation-language.md), with Go 1.27.3 selected for
 development. Release packaging and targets, exact API routes, and remaining
 protocol details are open; see the [ADR ledger](adr/README.md).

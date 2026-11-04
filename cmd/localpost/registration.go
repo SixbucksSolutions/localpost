@@ -59,7 +59,7 @@ func (r *registry) register(directory string) (*registration, error) {
 	}
 	mailbox := &registration{
 		ID: id, Port: address.Port, directory: directory, listener: listener,
-		server: &http.Server{Handler: http.NotFoundHandler(), ReadHeaderTimeout: 5 * time.Second},
+		server: &http.Server{Handler: newMessageHandler(directory), ReadHeaderTimeout: 5 * time.Second},
 	}
 	r.registrations[id] = mailbox
 	go r.serveMailbox(mailbox)

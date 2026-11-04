@@ -1,7 +1,7 @@
 # High-level architecture
 
 **Status:** target architecture. The executable, admin listener, and mailbox
-registration are implemented; message delivery and unregistration remain unimplemented.
+registration and message delivery are implemented; unregistration remains unimplemented.
 Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
@@ -25,7 +25,7 @@ flowchart LR
     Admin --> Registry[In-memory registration table]
     Registry --> Mailbox[Dedicated mailbox HTTP listener]
     Sender[Browser JS or HTTP client] -->|POST body| Mailbox
-    Mailbox --> Writer[Temporary file then final rename]
+    Mailbox --> Writer[Temporary file then complete-file publication]
     Writer --> Directory[Agent-created directory]
     Directory -->|Read complete .dat files| Agent
     Process --- Admin
@@ -70,20 +70,21 @@ The admin request is bounded to 64 KiB, with a 30-second headers-and-body read
 budget. This does not impose a deadline on filesystem operations. Directory
 validation creates, closes,
 and removes a temporary probe before accepting the registration; it never
-creates the directory or alters permissions. Future admin routes and the message
-upload path remain to be selected by their implementation stories.
+creates the directory or alters permissions. Future admin routes remain to be
+selected by their implementation stories; mailbox delivery uses `POST /messages`.
 
 ## Receiving and publishing a message
 
-One completed HTTP POST body is one message. The initial accepted media types
-are `application/octet-stream` and `application/json`. Media-type parameter
-handling remains to be specified. Both types use the same opaque-byte pipeline.
+One completed `POST /messages` body on a mailbox port is one message. The accepted
+media types are `application/octet-stream` and `application/json`, including
+media-type parameters. Both types use the same opaque-byte pipeline.
 
 1. Check HTTP framing and the accepted media type without interpreting the body.
 2. Receive the body with a 10 MiB limit and a 30-second stalled-upload timeout.
 3. Write the body bytes to a temporary file in the registration's directory.
-4. Close the complete file and publish it with a same-directory atomic rename
-   to `localpost_[UUIDv7].dat`, without overwriting another delivery.
+4. Close the complete file and publish a same-directory hard link named
+   `localpost_[UUIDv7].dat`, without overwriting another delivery. Remove the
+   temporary name on a best-effort basis after publication.
 5. Return `200` containing the final filename and received byte count.
 
 There is no text conversion, JSON parsing, automatic content decompression,
@@ -94,8 +95,18 @@ payload or the HTTP response, not injected into the stored content.
 
 Malformed, oversized, timed-out, disconnected, or failed writes must not publish
 a partial `.dat` file or return success. Temporary-file cleanup is best effort;
-a crash can leave temporary files. Agents ignore temporary names. The exact
-temporary naming convention and error status mapping are still open.
+a crash can leave temporary files. Agents ignore temporary names. Upload staging
+names use the `.localpost-upload-` prefix; the README records the error mapping.
+
+UUIDv7 generation uses Go's standard `uuid` package. Publication requires a
+hard-link-capable filesystem. An unsupported link operation fails explicitly;
+there is no copy-to-final fallback that could expose partial contents. A final
+name can be read only after the underlying file is complete and closed.
+
+The mailbox read deadline is renewed while bytes arrive, rather than applying
+the admin API's absolute 30-second read limit to the whole upload. It does not
+bound filesystem operation duration. The final response is JSON with `filename`
+and `bytes`; the message itself is never wrapped in a JSON envelope.
 
 ## Completion and uncertainty
 

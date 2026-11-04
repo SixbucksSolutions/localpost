@@ -7,9 +7,9 @@ unchanged as files in an agent-selected directory. An agent registers a mailbox,
 gets a dedicated listening port, and reads the resulting files with its normal
 filesystem tools.
 
-**Status:** the Go executable, loopback admin listener, and mailbox registration
-are implemented. Message delivery and unregistration are not implemented yet.
-The delivery workflow and contract below describe the target service.
+**Status:** the Go executable, loopback admin listener, mailbox registration,
+and message delivery are implemented. Unregistration and browser CORS support
+remain for later M01 stories.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -89,8 +89,8 @@ The operator can start the foundation with:
 ```
 
 Stop it with Ctrl+C. The startup message confirms the bound address. Registration
-is available on the admin port; each allocated mailbox returns not found until
-message delivery is implemented. Full release packaging belongs to a later milestone.
+is available on the admin port; each allocated mailbox accepts messages at
+`/messages`. Full release packaging belongs to a later milestone.
 
 There is no configuration file. The admin listener and all mailbox listeners
 will use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
@@ -146,7 +146,44 @@ readable `message`, for example:
 
 A lost response does not undo an established registration. The admin port is
 for JSON control requests; mailbox payloads remain opaque bytes.
-CORS support for browser callers and the actual upload route are later M01 stories.
+CORS support for browser callers is a later M01 story.
+
+## Message API
+
+Send a message with `POST /messages` on the port returned by registration. Use
+`application/octet-stream` or `application/json`; media-type parameters are
+accepted. Both bodies are opaque bytes, so JSON-labelled content is not parsed
+or repaired. HTTP transfer framing is removed by the HTTP server; content
+encoding is not decompressed.
+
+For example, after registering an inbox:
+
+```powershell
+$mailbox = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:53147/registrations `
+    -ContentType application/json -Body $body
+$delivery = Invoke-RestMethod -Method Post `
+    -Uri "http://127.0.0.1:$($mailbox.port)/messages" `
+    -ContentType application/json -Body '{"event":"test"}'
+Get-Content -LiteralPath (Join-Path $inbox $delivery.filename) -Raw
+```
+
+HTTP `200` returns JSON containing `filename` and `bytes`. Success means a
+complete file was published. Empty bodies are valid; bodies above 10 MiB are
+rejected. An upload may take longer than 30 seconds while making progress, but
+a 30-second stalled read ends it. There is no power-loss durability guarantee
+or automatic retry. A lost response can leave delivery uncertain.
+
+Files are first written under a temporary name. The closed, complete file is
+published with a same-directory hard link, then its temporary name is removed
+on a best-effort basis. This avoids overwriting an existing delivery without
+filename reservation machinery. The destination filesystem must support hard
+links; unsupported publication fails instead of falling back to partial-file
+visibility. Consumers read only final `localpost_[UUIDv7].dat` names.
+
+Message errors use the same JSON envelope as registration errors: `400`
+`invalid_request`, `404` `not_found`, `405` `method_not_allowed`, `408`
+`request_timeout`, `413` `request_too_large`, `415` `unsupported_media_type`, or
+`500` `delivery_failed`.
 
 ## Delivery contract
 
@@ -156,7 +193,7 @@ CORS support for browser callers and the actual upload route are later M01 stori
 | Accepted content types | `application/octet-stream` and `application/json` |
 | Payload handling | Preserve body bytes; no JSON validation, decoding, or added newline |
 | Filename | `localpost_[UUIDv7].dat` |
-| Publication | Write a temporary file, close it, then rename to the final name |
+| Publication | Write a temporary file, close it, then publish a complete final name without overwriting |
 | Success | `200` after publication, returning the filename and byte count |
 | Empty body | Accepted; produces a zero-byte file |
 | Maximum body | 10 MiB (10,485,760 bytes) |

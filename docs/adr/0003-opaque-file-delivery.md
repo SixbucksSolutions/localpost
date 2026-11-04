@@ -31,3 +31,11 @@ may leave temporary files; cleanup is best effort. Concurrent uploads have no
 ordering guarantee. Consumers needing ordering or correlation use information
 supplied by their senders. Media-type parameters and HTTP encoding policy remain
 open, but no policy may silently transform the payload.
+
+## Implementation note (M01.03)
+
+Complete-file publication uses a same-directory hard link of the closed
+temporary file, followed by best-effort removal of its temporary name. This
+realizes the complete-file handoff without relying on platform-dependent rename
+replacement behavior. It requires filesystem hard-link support; failures remain
+explicit. UUIDv7 generation uses Go's standard `uuid` package.
