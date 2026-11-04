@@ -7,8 +7,9 @@ unchanged as files in an agent-selected directory. An agent registers a mailbox,
 gets a dedicated listening port, and reads the resulting files with its normal
 filesystem tools.
 
-**Status:** initial project and architecture documentation. The service is not
-implemented yet; commands below describe the intended interface.
+**Status:** M01.01 implements the Go executable and loopback admin listener.
+Mailbox registration, message delivery, and their API routes are not implemented
+yet. The delivery workflow and contract below describe the target service.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -37,15 +38,35 @@ understand them.
 If localpost is unavailable, the agent tells the person running it. Agents do
 not start a replacement daemon or fall back to project-local collectors.
 
-## Intended command line
+## Build and run the foundation
 
-```sh
-localpost                 # Admin API at http://127.0.0.1:53147
-localpost --port 53148    # Override the admin port
+Development uses Go **1.27.3**, recorded in `.go-version`. The PowerShell check
+script selects that exact toolchain and runs formatting checks, tests, vet, and
+the executable build:
+
+```powershell
+./scripts/check.ps1
+./bin/localpost.exe --help
 ```
 
+The current development check runs on Windows with PowerShell 7. A Go installation
+must be available; Go may download the selected toolchain if it is not installed.
+The built executable does not require a Go installation to run.
+
+The operator can start the foundation with:
+
+```powershell
+./bin/localpost.exe                 # Admin listener at http://127.0.0.1:53147
+./bin/localpost.exe --port 53148    # Override the admin port
+```
+
+Stop it with Ctrl+C. Until the mailbox stories are implemented, HTTP requests
+receive a not-found response; there is no registration or upload endpoint yet.
+The startup message confirms the bound address. Full release packaging belongs
+to a later milestone.
+
 There is no configuration file. The admin listener and all mailbox listeners
-use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
+will use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
 to fail clearly; localpost does not silently choose a different admin port.
 
 ## Delivery contract

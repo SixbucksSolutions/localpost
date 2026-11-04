@@ -9,8 +9,10 @@ project-local copies of shared services.
 
 Implement the daemon in **Go**, following `docs/adr/0006-go-implementation-language.md`.
 Use the standard library first; do not reopen the language choice without a new
-explicit decision. Toolchain version, packaging, release targets, and dependencies
-remain to be selected. The language ADR does not authorize implementation work.
+explicit decision. Go 1.27.3 is the development toolchain, recorded in `.go-version`
+and selected explicitly by `scripts/check.ps1`. Run that script before handing off
+code changes. Packaging, release targets, and future dependencies remain to be
+selected. The language ADR does not authorize implementation work.
 
 ## Development board
 
@@ -86,6 +88,12 @@ Move a card to In Progress before work, tests, documentation, or delegation on
 that card. Preserve dependencies and prerequisite acceptance gates. Keep work
 In Progress through independent review; finished work awaiting Terry's approval
 belongs in Ready for Review. Terry controls Completed.
+
+Blocked means neither Bot nor Terry can advance the work until an external
+condition changes. Needs Terry means a specific input or action from Terry is
+required. Finished work awaiting review stays Ready for Review. Ordinary
+prerequisite dependencies remain in Ready for Work and do not waive acceptance
+gates for starting dependent work.
 
 Keep an active epic In Progress while any child story is below Ready for Review.
 Only when every child is Ready for Review or Completed may the epic move to

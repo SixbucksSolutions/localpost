@@ -1,14 +1,15 @@
 # High-level architecture
 
-**Status:** intended architecture, not an implemented service. Accepted decisions
-are recorded in the [ADR ledger](adr/README.md).
+**Status:** target architecture. M01.01 implements the executable and admin
+listener foundation; mailbox registration and delivery remain unimplemented.
+Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
 
 Implement the daemon in **Go**, with a standard-library-first approach and a
 standalone executable per supported target. [ADR 0006](adr/0006-go-implementation-language.md)
-records the choice over Rust and its maintenance tradeoffs. The exact toolchain
-version, release targets, packaging, and any required dependencies remain open.
+records the choice over Rust and its maintenance tradeoffs. Development uses
+Go 1.27.3; release targets, packaging, and any future dependencies remain open.
 
 Go's HTTP and filesystem APIs provide building blocks, not proof of the delivery
 contract. In particular, atomic publication without overwriting another delivery

@@ -17,7 +17,8 @@ maintainer; it does not mean the behavior has been implemented or tested.
 
 These are not additional accepted requirements:
 
-- Go toolchain version, release packaging, and initially supported operating systems.
+- Release packaging and initially supported operating systems. Development uses
+  Go 1.27.3 as recorded in `.go-version` and the README.
 - Exact admin and mailbox paths, schemas, identity format, and error codes.
 - Media-type parameter policy and supported HTTP body framing/content encodings.
 - Concurrent-upload, registration, and aggregate temporary-storage limits; bounds
