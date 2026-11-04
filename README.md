@@ -8,9 +8,9 @@ gets a dedicated listening port, and reads the resulting files with its normal
 filesystem tools.
 
 **Status:** the Go executable, loopback admin listener, mailbox registration,
-message delivery, unregistration, and permissive CORS are implemented. Broader
-robustness qualification, a real-browser demonstration, and release packaging
-remain in M02-M04.
+message delivery, unregistration, and permissive CORS are implemented. Bounded
+robustness checks and race-test automation accompany the core. A real-browser
+demonstration and release packaging remain in M03-M04.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -79,6 +79,14 @@ The policy favors checks that earn their maintenance cost. It does not enable
 every available linter or arbitrary function-length and complexity quotas.
 Expected best-effort cleanup may explicitly discard an error with an explanation;
 blanket exclusions are not the way to make a failing check pass.
+
+The [race workflow](.github/workflows/race.yml) runs the suite three times with
+`go test -race` on an Ubuntu runner with GCC and the same pinned Go version.
+This supplies race-instrumented verification where the Windows development
+environment lacks a C compiler; it does not establish a new release platform.
+The detector covers executed paths, not every possible schedule. The bounded
+qualification tests also check mailbox isolation, capacity recovery, preserved
+files, and cleanup across repeated concurrent lifecycle cycles.
 
 ### Run
 

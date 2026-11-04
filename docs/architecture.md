@@ -2,7 +2,8 @@
 
 **Status:** target architecture. The executable, admin listener, and mailbox
 registration, message delivery, unregistration, and browser CORS are implemented.
-Broader qualification and the real-browser demonstration remain later milestones.
+Bounded robustness qualification accompanies the core. The real-browser
+demonstration remains a later milestone.
 Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
@@ -199,5 +200,6 @@ The implementation should establish these properties before release:
 - Unregistration and process stop are bounded and preserve completed deliveries.
 - Restart restores no registrations; ports remain unprivileged and loopback-only.
 
-Go is selected by ADR 0006. The core has executable HTTP integration tests;
-packaging, release-platform scope, and broader qualification remain later work.
+Go is selected by ADR 0006. The core has executable HTTP integration and bounded
+concurrency qualification tests, plus a Linux race-instrumented CI run. Packaging,
+release-platform scope, and real-browser demonstration remain later work.

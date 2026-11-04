@@ -77,8 +77,9 @@ and exactly-once delivery are also outside this version's agreed scope.
 
 The current foundation provides a Go executable, loopback admin listener, and
 JSON mailbox registration, opaque message delivery, mailbox unregistration,
-and permissive browser CORS. The core has HTTP integration checks; broader
-qualification, real-browser demonstration, and a packaged release remain later work.
+and permissive browser CORS. The core has HTTP integration, bounded robustness,
+and race-instrumented verification. A real-browser demonstration and a packaged
+release remain later work.
 **Go is the selected implementation language**, as recorded
 in [ADR 0006](adr/0006-go-implementation-language.md), with Go 1.27.3 selected for
 development. Release packaging and targets, exact API routes, and remaining

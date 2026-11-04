@@ -1,0 +1,47 @@
+name: Go race verification
+
+on:
+  push:
+    paths:
+      - '**/*.go'
+      - go.mod
+      - .go-version
+      - .github/workflows/race.yml
+  pull_request:
+    paths:
+      - '**/*.go'
+      - go.mod
+      - .go-version
+      - .github/workflows/race.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: race-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  race:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Verify race toolchain
+        run: |
+          go version
+          gcc --version
+          test "$(go env CGO_ENABLED)" = "1"
+      - name: Run race-instrumented tests
+        run: go test -race -count=3 -timeout=5m ./...
+      - name: Vet source
+        run: go vet ./...
