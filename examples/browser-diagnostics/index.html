@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>localpost browser diagnostic pilot</title>
+<style>
+  body { font: 18px system-ui, sans-serif; max-width: 46rem; margin: 3rem auto; padding: 0 1rem; }
+  label { display: block; margin: 1rem 0; }
+  input:not([type=checkbox]) { display: block; width: 100%; box-sizing: border-box; padding: .5rem; }
+  button { padding: .6rem 1.2rem; font: inherit; }
+  output { font-weight: bold; }
+  code { overflow-wrap: anywhere; }
+</style>
+<h1>Browser diagnostic pilot</h1>
+<p>A synthetic counter. Each <strong>Add one</strong> action should increase the count by one.
+Diagnostics are optional and never retry or change the counter.</p>
+<label><input id="enabled" type="checkbox"> Send diagnostics to localpost</label>
+<label>Daemon loopback base URL<input id="base" value="http://127.0.0.1:53147" maxlength="80" autocomplete="off" spellcheck="false"></label>
+<label>Registration UUIDv4<input id="registration" maxlength="36" autocomplete="off" spellcheck="false"></label>
+<p>Run: <code id="run"></code></p>
+<p>Count: <output id="count" aria-live="polite">0</output></p>
+<button id="add" type="button">Add one</button>
+<p>Action sequence: <output id="sequence">0</output> / 1000</p>
+<p>Latest diagnostic: <output id="delivery" aria-live="polite">disabled</output></p>
+<p>Reload to start a new bounded run. The agent prepares and retires the mailbox separately.</p>
+<script type="module" src="/pilot.mjs"></script>
+</html>

@@ -57,6 +57,10 @@ The current development check runs on Windows with PowerShell 7. A Go installati
 must be available; Go may download the selected toolchain if it is not installed.
 The built executable does not require a Go installation to run.
 
+The browser pilot's development checks also use Node **26.13.0**, pinned in
+`.node-version`, with its built-in test runner and no npm dependencies. Node is
+not required to run the localpost daemon.
+
 The tool installer downloads the official Windows x64 linter release, verifies
 its published SHA256 checksum, and keeps it under ignored `.tools/`. It does not
 change global tools. Installation needs network access; the check requires the
@@ -92,6 +96,13 @@ files, and cleanup across repeated concurrent lifecycle cycles.
 Shared-listener coverage includes invalid and retired IDs, connection reuse,
 rejection/preflight body cleanup, and overlapping mailbox deletion with process
 shutdown. These are HTTP tests; the real-browser demonstration remains in M04.
+
+The same check runs syntax and behavior tests for the
+[development-only browser diagnostics pilot](examples/browser-diagnostics/README.md).
+CI runs those tests alongside Go race verification. The pilot serves static
+assets on a separate loopback port and sends diagnostics to the shared daemon;
+it does not write diagnostic files or start a replacement service. Real-browser
+feedback-loop evidence remains M04.02.
 
 ### Run
 

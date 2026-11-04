@@ -39,6 +39,17 @@ try {
     & $lint run --config .golangci.yml ./...
     if ($LASTEXITCODE -ne 0) { throw 'golangci-lint failed.' }
 
+    # The development-only browser pilot uses Node's built-in test runner.
+    $expectedNode = (Get-Content (Join-Path $repoRoot '.node-version') -Raw).Trim()
+    $nodeVersion = & node --version
+    if ($LASTEXITCODE -ne 0 -or $nodeVersion.Trim() -ne "v$expectedNode") {
+        throw "Browser pilot checks require Node $expectedNode."
+    }
+    & node --check examples/browser-diagnostics/pilot.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Browser pilot syntax check failed.' }
+    & node --test examples/browser-diagnostics/pilot.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Browser pilot tests failed.' }
+
     & go test ./...
     if ($LASTEXITCODE -ne 0) { throw 'go test failed.' }
     & go vet ./...

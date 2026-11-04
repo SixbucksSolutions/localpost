@@ -6,12 +6,18 @@ on:
       - '**/*.go'
       - go.mod
       - .go-version
+      - .node-version
+      - 'examples/**'
+      - scripts/check.ps1
       - .github/workflows/race.yml
   pull_request:
     paths:
       - '**/*.go'
       - go.mod
       - .go-version
+      - .node-version
+      - 'examples/**'
+      - scripts/check.ps1
       - .github/workflows/race.yml
   workflow_dispatch:
 
@@ -41,6 +47,14 @@ jobs:
           go version
           gcc --version
           test "$(go env CGO_ENABLED)" = "1"
+      - name: Set up pilot test runtime
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - name: Check browser pilot
+        run: |
+          node --check examples/browser-diagnostics/pilot.mjs
+          node --test examples/browser-diagnostics/pilot.test.mjs
       - name: Run race-instrumented tests
         run: go test -race -count=3 -timeout=5m ./...
       - name: Vet source
