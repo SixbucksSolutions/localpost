@@ -14,6 +14,13 @@ and selected explicitly by `scripts/check.ps1`. Run that script before handing o
 code changes. Packaging, release targets, and future dependencies remain to be
 selected. The language ADR does not authorize implementation work.
 
+The mandatory check includes pinned golangci-lint from `.golangci-version` and
+the curated rules in `.golangci.yml`, plus formatting, tests, vet, and build.
+Use `scripts/install-tools.ps1` for the local development linter. Keep the rule set
+strict but useful: do not enable all linters, add arbitrary size/style quotas,
+blanket-exclude tests, or suppress findings merely to obtain a green result.
+Fix substantive issues; explain any narrow intentional error discard or exception.
+
 ## Development board
 
 Use the shared localswim implementation at `C:\Projects\localswim`.

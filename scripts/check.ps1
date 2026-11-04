@@ -16,6 +16,21 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'gofmt failed.' }
     if ($unformatted) { throw "Go files require formatting: $unformatted" }
 
+    $lintVersion = (Get-Content (Join-Path $repoRoot '.golangci-version') -Raw).Trim()
+    $lint = Join-Path $repoRoot ".tools/golangci-lint/$lintVersion/golangci-lint.exe"
+    if (-not (Test-Path -LiteralPath $lint -PathType Leaf)) {
+        throw 'Pinned golangci-lint is missing. Run ./scripts/install-tools.ps1 first.'
+    }
+    $lintInfo = & $lint version --json
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect the pinned golangci-lint version.' }
+    if (($lintInfo | ConvertFrom-Json).version -ne $lintVersion) {
+        throw 'golangci-lint version does not match .golangci-version. Run ./scripts/install-tools.ps1.'
+    }
+    & $lint config verify --config .golangci.yml
+    if ($LASTEXITCODE -ne 0) { throw 'golangci-lint configuration validation failed.' }
+    & $lint run --config .golangci.yml ./...
+    if ($LASTEXITCODE -ne 0) { throw 'golangci-lint failed.' }
+
     & go test ./...
     if ($LASTEXITCODE -ne 0) { throw 'go test failed.' }
     & go vet ./...

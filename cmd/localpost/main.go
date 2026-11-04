@@ -1,3 +1,4 @@
+// Package main provides the localpost loopback HTTP daemon.
 package main
 
 import (
@@ -43,8 +44,10 @@ func run(ctx context.Context, cfg config, output io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", address, err)
 	}
-	defer listener.Close()
-	fmt.Fprintf(output, "localpost listening on http://%s\n", listener.Addr())
+	// Closing an already stopped listener is best-effort cleanup.
+	defer func() { _ = listener.Close() }()
+	// Losing a diagnostic output stream does not change listener ownership.
+	_, _ = fmt.Fprintf(output, "localpost listening on http://%s\n", listener.Addr())
 	return serve(ctx, listener)
 }
 
@@ -55,9 +58,10 @@ func serve(ctx context.Context, listener net.Listener) error {
 	}
 	// Only this admin listener exists so far. Full mailbox draining belongs to
 	// the later lifecycle implementation; cancellation releases all connections.
+	// Cleanup errors cannot change the cancellation outcome.
 	stop := context.AfterFunc(ctx, func() { _ = server.Close() })
 	defer stop()
-	defer server.Close()
+	defer func() { _ = server.Close() }()
 	if err := server.Serve(listener); err != nil {
 		if errors.Is(err, http.ErrServerClosed) && ctx.Err() != nil {
 			return nil
@@ -74,11 +78,12 @@ func main() {
 	}
 	if err == nil {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-		defer stop()
 		err = run(ctx, cfg, os.Stdout)
+		stop()
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "localpost: %v\n", err)
+		// There is no secondary diagnostic channel if stderr is unavailable.
+		_, _ = fmt.Fprintf(os.Stderr, "localpost: %v\n", err)
 		os.Exit(1)
 	}
 }

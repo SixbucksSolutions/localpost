@@ -40,11 +40,12 @@ not start a replacement daemon or fall back to project-local collectors.
 
 ## Build and run the foundation
 
-Development uses Go **1.27.3**, recorded in `.go-version`. The PowerShell check
-script selects that exact toolchain and runs formatting checks, tests, vet, and
-the executable build:
+Development uses Go **1.27.3**, recorded in `.go-version`, and golangci-lint
+**2.15.0**, recorded in `.golangci-version`. Install the pinned development linter
+once, then run the complete check:
 
 ```powershell
+./scripts/install-tools.ps1
 ./scripts/check.ps1
 ./bin/localpost.exe --help
 ```
@@ -52,6 +53,33 @@ the executable build:
 The current development check runs on Windows with PowerShell 7. A Go installation
 must be available; Go may download the selected toolchain if it is not installed.
 The built executable does not require a Go installation to run.
+
+The tool installer downloads the official Windows x64 linter release, verifies
+its published SHA256 checksum, and keeps it under ignored `.tools/`. It does not
+change global tools. Installation needs network access; the check requires the
+pinned local linter and does not silently skip missing tooling.
+
+### Quality bar
+
+`scripts/check.ps1` runs formatting, the selected lint rules, tests, `go vet`, and
+the executable build. Go's compiler checks types; `govet` and Staticcheck add
+analysis beyond type correctness. `.golangci.yml` enables a deliberate set of
+linters with `default: none`:
+
+| Checks | Purpose |
+| --- | --- |
+| `govet`, `staticcheck` | Suspicious constructs, API misuse, and likely bugs |
+| `errcheck`, `errorlint` | Unhandled errors and incorrect error wrapping/comparison |
+| `bodyclose` | HTTP response-body leaks |
+| `unused`, `ineffassign`, `unconvert` | Dead code, ineffective assignments, and unnecessary conversions |
+| `revive`, `gocritic` | Selected/default maintainability and diagnostic checks |
+
+The policy favors checks that earn their maintenance cost. It does not enable
+every available linter or arbitrary function-length and complexity quotas.
+Expected best-effort cleanup may explicitly discard an error with an explanation;
+blanket exclusions are not the way to make a failing check pass.
+
+### Run
 
 The operator can start the foundation with:
 

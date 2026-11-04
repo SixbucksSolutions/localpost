@@ -61,7 +61,11 @@ func TestParseConfigHelp(t *testing.T) {
 
 func TestRunOccupiedPort(t *testing.T) {
 	listener := newTestListener(t)
-	port := listener.Addr().(*net.TCPAddr).Port
+	address, ok := listener.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatal("listener did not provide a TCP address")
+	}
+	port := address.Port
 	var output bytes.Buffer
 	err := run(context.Background(), config{port: port}, &output)
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1:"+strconv.Itoa(port)) {
@@ -86,7 +90,9 @@ func TestServeHTTPAndCancellation(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, err := io.ReadAll(response.Body)
-	response.Body.Close()
+	if closeErr := response.Body.Close(); closeErr != nil {
+		t.Fatal(closeErr)
+	}
 	if err != nil || response.StatusCode != http.StatusNotFound || !strings.Contains(string(body), "404") {
 		t.Fatalf("placeholder HTTP response = %d, %q, %v", response.StatusCode, body, err)
 	}
@@ -96,7 +102,8 @@ func TestServeHTTPAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	// Test cleanup can race with the server closing its side of the connection.
+	defer func() { _ = conn.Close() }()
 	if _, err := io.WriteString(conn, "GET / HTTP/1.1\r\n"); err != nil {
 		t.Fatal(err)
 	}
@@ -112,9 +119,10 @@ func TestServeHTTPAndCancellation(t *testing.T) {
 	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 		t.Fatal(err)
 	}
+	var timeout net.Error
 	if _, err := conn.Read(make([]byte, 1)); err == nil {
 		t.Fatal("connection remained readable after server shutdown")
-	} else if timeout, ok := err.(net.Error); ok && timeout.Timeout() {
+	} else if errors.As(err, &timeout) && timeout.Timeout() {
 		t.Fatal("connection remained open after server shutdown")
 	}
 	// Rebinding the exact address proves shutdown released the listener.
@@ -122,7 +130,9 @@ func TestServeHTTPAndCancellation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listener was not released: %v", err)
 	}
-	rebound.Close()
+	if err := rebound.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestServeAlreadyCancelled(t *testing.T) {
@@ -147,6 +157,7 @@ func newTestListener(t *testing.T) net.Listener {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { listener.Close() })
+	// Serve may already have closed this listener.
+	t.Cleanup(func() { _ = listener.Close() })
 	return listener
 }
