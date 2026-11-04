@@ -86,3 +86,7 @@ Move a card to In Progress before work, tests, documentation, or delegation on
 that card. Preserve dependencies and prerequisite acceptance gates. Keep work
 In Progress through independent review; finished work awaiting Terry's approval
 belongs in Ready for Review. Terry controls Completed.
+
+Keep an active epic In Progress while any child story is below Ready for Review.
+Only when every child is Ready for Review or Completed may the epic move to
+Ready for Review. This does not authorize Bot to move the epic to Completed.
