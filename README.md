@@ -10,9 +10,9 @@ its normal filesystem tools.
 **Status:** the Go executable, shared loopback listener, mailbox registration,
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. A real-browser
-demonstration and release packaging remain in M04-M05. The M03 API uses one
-listener and UUIDv4-addressed registrations; the old per-registration ports are
-removed.
+demonstration, OpenAPI documentation, and release packaging remain in M04-M06.
+The M03 API uses one listener and UUIDv4-addressed registrations; the old
+per-registration ports are removed.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -89,6 +89,9 @@ environment lacks a C compiler; it does not establish a new release platform.
 The detector covers executed paths, not every possible schedule. The bounded
 qualification tests also check mailbox isolation, capacity recovery, preserved
 files, and cleanup across repeated concurrent lifecycle cycles.
+Shared-listener coverage includes invalid and retired IDs, connection reuse,
+rejection/preflight body cleanup, and overlapping mailbox deletion with process
+shutdown. These are HTTP tests; the real-browser demonstration remains in M04.
 
 ### Run
 
