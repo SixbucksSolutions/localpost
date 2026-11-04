@@ -30,3 +30,11 @@ It runs with the permissions of its ordinary user account.
 CORS cannot override an application's CSP or browser local-network permission
 requirements. A thin application-side forwarding route remains possible while
 keeping file delivery centralized.
+
+## Implementation note (M01.05)
+
+The shared CORS wrapper advertises `POST, DELETE, OPTIONS` on the admin listener
+and `POST, OPTIONS` on mailbox listeners. Preflights return `204` without a
+registration or message write. Application errors retain the same wildcard
+origin policy. The wrapper preserves the HTTP response controller used for
+upload timeouts and cleanup.

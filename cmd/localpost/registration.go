@@ -73,7 +73,7 @@ func (r *registry) register(directory string) (*registration, error) {
 	}
 	handler := newMessageHandler(directory)
 	handler.mailbox = mailbox
-	mailbox.server = &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+	mailbox.server = &http.Server{Handler: withCORS(handler, "POST, OPTIONS"), ReadHeaderTimeout: 5 * time.Second}
 	r.registrations[id] = mailbox
 	go r.serveMailbox(mailbox)
 	return mailbox, nil

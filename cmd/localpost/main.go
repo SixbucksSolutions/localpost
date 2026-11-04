@@ -58,7 +58,7 @@ func serve(ctx context.Context, listener net.Listener) error {
 func serveWithRegistry(ctx context.Context, listener net.Listener, registrations *registry) error {
 	defer registrations.close()
 	server := &http.Server{
-		Handler:           registrations,
+		Handler:           withCORS(registrations, "POST, DELETE, OPTIONS"),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 	}

@@ -1,8 +1,8 @@
 # High-level architecture
 
 **Status:** target architecture. The executable, admin listener, and mailbox
-registration, message delivery, and unregistration are implemented. Browser CORS
-remains for the final M01 story.
+registration, message delivery, unregistration, and browser CORS are implemented.
+Broader qualification and the real-browser demonstration remain later milestones.
 Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 
 ## Implementation language
@@ -135,7 +135,7 @@ Access-Control-Allow-Headers: Content-Type
 
 `OPTIONS` does not produce a delivery file. The service has no authentication,
 credential requirement, or origin allowlist. Admin CORS follows the same
-permissive origin policy; its method list will match the finalized admin routes.
+permissive origin policy and advertises `POST, DELETE, OPTIONS`.
 
 Different localhost ports are different browser origins. CORS enables that
 cross-origin exchange, but it does not override the sending application's CSP or
@@ -194,5 +194,5 @@ The implementation should establish these properties before release:
 - Unregistration and process stop are bounded and preserve completed deliveries.
 - Restart restores no registrations; ports remain unprivileged and loopback-only.
 
-Go is selected by ADR 0006. Packaging, platform support, full HTTP conformance,
-and the concrete test harness remain open implementation decisions.
+Go is selected by ADR 0006. The core has executable HTTP integration tests;
+packaging, release-platform scope, and broader qualification remain later work.

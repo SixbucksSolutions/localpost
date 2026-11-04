@@ -8,8 +8,9 @@ gets a dedicated listening port, and reads the resulting files with its normal
 filesystem tools.
 
 **Status:** the Go executable, loopback admin listener, mailbox registration,
-message delivery, and unregistration are implemented. Browser CORS support
-remains for the final M01 story.
+message delivery, unregistration, and permissive CORS are implemented. Broader
+robustness qualification, a real-browser demonstration, and release packaging
+remain in M02-M04.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -81,7 +82,7 @@ blanket exclusions are not the way to make a failing check pass.
 
 ### Run
 
-The operator can start the foundation with:
+The operator can start localpost with:
 
 ```powershell
 ./bin/localpost.exe                 # Admin listener at http://127.0.0.1:53147
@@ -95,7 +96,7 @@ is available on the admin port; each allocated mailbox accepts messages at
 `/messages`. Full release packaging belongs to a later milestone.
 
 There is no configuration file. The admin listener and all mailbox listeners
-will use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
+use unprivileged TCP ports on `127.0.0.1`. An occupied admin port causes startup
 to fail clearly; localpost does not silently choose a different admin port.
 
 ## Registration API
@@ -148,7 +149,7 @@ readable `message`, for example:
 
 A lost response does not undo an established registration. The admin port is
 for JSON control requests; mailbox payloads remain opaque bytes.
-CORS support for browser callers is a later M01 story.
+Browser callers use the permissive CORS policy described below.
 
 ## Unregistration API
 
@@ -217,6 +218,32 @@ Message errors use the same JSON envelope as registration errors: `400`
 `invalid_request`, `404` `not_found`, `405` `method_not_allowed`, `408`
 `request_timeout`, `413` `request_too_large`, `415` `unsupported_media_type`, or
 `500` `delivery_failed`.
+
+## Browser CORS
+
+Admin and mailbox responses, including application errors, send
+`Access-Control-Allow-Origin: *`. Both allow the `Content-Type` request header.
+The admin listener advertises `POST, DELETE, OPTIONS`; mailbox listeners
+advertise `POST, OPTIONS`. No credentials, tokens, or origin registration are
+needed. `OPTIONS` preflights return `204` without creating a registration or file.
+
+After the agent prepares a directory and supplies its registered mailbox port,
+browser JavaScript can send a JSON diagnostic and read the JSON receipt:
+
+```javascript
+const response = await fetch(`http://127.0.0.1:${mailboxPort}/messages`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  credentials: "omit",
+  body: JSON.stringify({ event: "example", phase: "rendered" }),
+});
+const receipt = await response.json();
+if (!response.ok) throw new Error(receipt.error.message);
+```
+
+The core HTTP checks cover preflights, error headers, file delivery, removal,
+and sibling isolation. They are not a real-browser demonstration; that remains
+M03. An application's CSP and the browser's local-network permissions still apply.
 
 ## Delivery contract
 
