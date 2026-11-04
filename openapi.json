@@ -1,0 +1,763 @@
+{
+  "openapi": "3.2.1",
+  "info": {
+    "title": "localpost shared daemon API",
+    "version": "unreleased",
+    "description": "Canonical contract for the implemented shared loopback daemon. The info version identifies this unreleased API description; it is independent of the OpenAPI specification version.\n\nAll three routes share one plain HTTP listener bound to IPv4 loopback 127.0.0.1. There is no authentication, authorization token, credential requirement, origin registration, or origin allowlist. Registration IDs address mailboxes and are not secrets. The caller supplies an existing writable destination on the daemon host. Registrations live only in memory and disappear on process exit; delivery files remain.\n\nCORS: every application response, including application errors, sends Access-Control-Allow-Origin: *, Access-Control-Allow-Headers: Content-Type, and Access-Control-Allow-Methods: POST, DELETE, OPTIONS. OPTIONS on ANY path returns 204 before route/ID validation and creates no file or registration. No Access-Control-Allow-Credentials is sent. Browser callers should omit credentials; application CSP and browser local-network permissions still apply.\n\nRouting is case-sensitive except for hexadecimal letters in UUIDv4 path IDs, which are normalized to lowercase. Unknown paths, including the obsolete bare /messages route, return 404 with not_found. Trailing slashes are not normalized: /registrations/ is treated as a malformed ID (400), while /registrations/{id}/ and /registrations/{id}/messages/ are unrecognized paths (404). Malformed UUIDv4 route IDs return 400 with invalid_registration_id; well-formed unknown or retired IDs return 404 with registration_not_found. On recognized routes, unsupported methods return 405 with Allow: POST or DELETE, subject to the route/ID/admission checks described by each operation. OPTIONS bypasses those checks.\n\nResponses below describe application-handler JSON envelopes. Malformed HTTP headers, invalid framing rejected before handler dispatch, and other net/http transport rejections may instead produce a transport-level response or close the connection, without this JSON envelope or application CORS headers. The server allows 5 seconds for request headers and 30 seconds for control-request reading; uploads override the body deadline with a 30-second progress-based idle deadline. Rejected or incomplete bodies may cause connection closure; successful body consumption allows normal keep-alive reuse.\n\nFixed limits: 64 live registrations and 16 admitted uploads globally. Closing registrations retain capacity through cleanup, and upload slots remain held through publication and the temporary-file cleanup attempt. The 160 MiB aggregate maximum of admitted payload bytes does not bound all memory, retained files, or failed-cleanup leftovers. Shutdown stops new work and provides one shared 30-second grace deadline before interruption; filesystem cleanup can take longer. There is no durable queue, automatic retry, or power-loss durability guarantee."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:{port}",
+      "description": "One shared IPv4 loopback listener. The operator may select an unprivileged port with --port (1024-65535); occupied ports fail startup rather than silently changing.",
+      "variables": {
+        "port": {
+          "default": "53147",
+          "description": "Operator-selected listener port; default 53147, accepted range 1024-65535. Not a per-registration port."
+        }
+      }
+    }
+  ],
+  "security": [],
+  "paths": {
+    "/registrations": {
+      "post": {
+        "operationId": "registerMailbox",
+        "summary": "Register an existing destination directory",
+        "description": "Creates an independent in-memory mailbox on the shared listener and returns only its UUIDv4 ID. Registering the same directory again creates another identity. Registrations disappear when the daemon exits; existing delivery files remain. A lost response does not undo registration, and retrying can create another mailbox.\n\nThe canonical request is exactly one JSON object with a `directory` string and no unknown fields. JSON is parsed for this control operation only. Media-type parameters such as `charset=utf-8` are accepted. The body limit is 65,536 bytes (64 KiB), including whitespace, with a 30-second control-request read budget. This is not a filesystem-operation deadline. At most 64 registrations may be live; closing registrations retain capacity until cleanup completes. Saturation rejects immediately without queuing or retrying.",
+        "requestBody": {
+          "required": true,
+          "description": "One JSON control object. Use the lowercase `directory` key shown here. The implementation uses Go JSON decoding (including case-insensitive field matching and later duplicate-key values); clients should use the canonical single-key object. Missing, null, or empty directory values do not identify an acceptable directory.",
+          "x-byte-limit": 65536,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegistrationRequest"
+              },
+              "examples": {
+                "windows": {
+                  "summary": "Placeholder directory on a Windows host",
+                  "value": {
+                    "directory": "C:\\localpost-example\\inbox"
+                  }
+                },
+                "posix": {
+                  "summary": "Placeholder directory on a POSIX host",
+                  "value": {
+                    "directory": "/tmp/localpost-example/inbox"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Mailbox registered. The listener port is not returned and does not change.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Registration"
+                },
+                "example": {
+                  "id": "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed, missing, non-object, trailing, or unknown-field JSON, an unreadable or timed-out control body, or an invalid/unwritable directory. Stable error codes: `invalid_request`, `invalid_directory`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A non-POST method on this path, except OPTIONS. Stable error code: `method_not_allowed`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              },
+              "Allow": {
+                "description": "Allowed method for this route.",
+                "schema": {
+                  "type": "string",
+                  "const": "POST"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Registration body exceeds 65,536 bytes, for known-length or streamed requests. Stable error code: `request_too_large`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Missing, malformed, or unsupported Content-Type; application/json is required. Stable error code: `unsupported_media_type`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Registration allocation is stopping/unavailable, or all 64 registration slots are owned. Stable error codes: `unavailable`, `registration_limit`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "options": {
+        "operationId": "preflightRegistrations",
+        "summary": "Handle CORS preflight",
+        "description": "Returns before route, ID, method, media-type, or body validation. No registration or delivery file is created. The same response applies to OPTIONS on every path, including unknown and retired registrations; these three Path Items are not an exhaustive list of preflight paths. No request body is needed.",
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/Preflight"
+          }
+        }
+      }
+    },
+    "/registrations/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RegistrationId"
+        }
+      ],
+      "delete": {
+        "operationId": "unregisterMailbox",
+        "summary": "Retire one mailbox and finish its cleanup",
+        "description": "Stops new uploads for this mailbox, then allows already accepted requests a 30-second grace period. Remaining requests are interrupted at the deadline; progress does not extend it. The response waits for request cleanup attempts, including filesystem operations that can outlast the deadline. It does not shut down the shared listener or affect sibling mailboxes. Completed delivery files remain untouched.\n\nConcurrent DELETE requests while the mailbox is closing join the same operation. Once removal finishes, another DELETE returns 404. Disconnecting the DELETE client does not cancel cleanup; a lost response leaves its outcome uncertain. No request body or Content-Type is required; a supplied body is not used. Whole-daemon shutdown uses one shared grace deadline rather than 30 seconds per mailbox.",
+        "responses": {
+          "200": {
+            "description": "Mailbox removed after accepted request cleanup attempts finish. The returned ID is lowercase even when the path ID used uppercase.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unregistration"
+                },
+                "example": {
+                  "id": "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b",
+                  "unregistered": true,
+                  "forced": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "ID does not have canonical UUIDv4 structure and RFC variant (hex letter case is accepted). Stable error code: `invalid_registration_id`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Well-formed registration ID is unknown or already retired. Stable error code: `registration_not_found`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A non-DELETE method on this path, except OPTIONS. ID validation happens first. Stable error code: `method_not_allowed`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              },
+              "Allow": {
+                "description": "Allowed method for this route.",
+                "schema": {
+                  "type": "string",
+                  "const": "DELETE"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "options": {
+        "operationId": "preflightRegistration",
+        "summary": "Handle CORS preflight",
+        "description": "Returns before route, ID, method, media-type, or body validation. No registration or delivery file is created. The same response applies to OPTIONS on every path, including unknown and retired registrations; these three Path Items are not an exhaustive list of preflight paths. No request body is needed.",
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/Preflight"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Path segment for this documented route. OPTIONS does not validate UUID syntax or registration existence; arbitrary segments are accepted.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/registrations/{id}/messages": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/RegistrationId"
+        }
+      ],
+      "post": {
+        "operationId": "deliverMessage",
+        "summary": "Deliver one opaque body as one complete file",
+        "description": "Accepts application/octet-stream or application/json, with valid media-type parameters. BOTH media types carry opaque bytes: JSON-labelled input can contain invalid JSON, arbitrary binary bytes, or no bytes. There is no JSON parsing, schema validation, string wrapping, base64 encoding, decoding, newline insertion, or content decompression. HTTP transfer framing is removed; content-encoded body bytes are stored as received.\n\nThe body limit is 10,485,760 bytes (10 MiB), inclusive; zero-byte files are valid. The upload read deadline resets on progress, allowing uploads longer than 30 seconds, but 30 seconds of stalled reading causes a timeout. This is distinct from the control-request read budget and the teardown grace period, and does not impose a deadline on OS filesystem calls.\n\nAt most 16 uploads are admitted across all mailboxes; a slot is held through publication and the temporary-file cleanup attempt. Saturation rejects immediately without a queue or retry. Closing mailboxes reject new requests with 503 until removed, then return 404.\n\nA temporary file is written and closed before a same-directory hard link publishes the complete final file without overwriting an existing destination. Hard-link support is required; failure does not fall back to partial-file visibility. Temporary-name removal is best effort, and its failure after successful publication does not change success. Consumers must read only final localpost_[UUIDv7].dat names and manage retention.\n\nA 200 response means publication completed, not durable persistence across power loss. No ordering across concurrent requests, durable queue, replay, recovery, or automatic retry is provided. A lost response can leave a published file; retrying can duplicate a message. Include any desired sequence/deduplication information in your own opaque payload.",
+        "requestBody": {
+          "required": false,
+          "description": "Raw HTTP body, including an empty body. An accepted Content-Type is still required for empty uploads. These media entries deliberately omit schemas so no JSON data model or base64/string representation is imposed. For example, the raw ASCII bytes `{not JSON` are accepted with either media type, and an empty byte sequence is accepted with either media type. The application/json label never causes validation or repair.",
+          "x-byte-limit": 10485760,
+          "content": {
+            "application/octet-stream": {},
+            "application/json": {}
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Complete file published; receipt byte count includes exactly the preserved body bytes. Temporary cleanup is best effort.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receipt"
+                },
+                "example": {
+                  "filename": "localpost_019a4fb0-1a00-7000-8000-000000000001.dat",
+                  "bytes": 9
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid UUIDv4 path ID, or the handler cannot read a complete HTTP body. Invalid JSON payload content is not an error. Stable error codes: `invalid_registration_id`, `invalid_request`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Well-formed registration ID is unknown or retired. Route mismatches elsewhere return not_found as described in the API overview. Stable error code: `registration_not_found`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "405": {
+            "description": "A non-POST method on a live mailbox route, except OPTIONS. ID existence and mailbox admission are checked first. Stable error code: `method_not_allowed`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              },
+              "Allow": {
+                "description": "Allowed method for this route.",
+                "schema": {
+                  "type": "string",
+                  "const": "POST"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "408": {
+            "description": "An upload body read timed out, including stalled reads; a forced teardown can interrupt a read as well. Stable error code: `request_timeout`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Body exceeds 10,485,760 bytes, for known-length or streamed requests. Stable error code: `request_too_large`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "Missing, malformed, or unsupported Content-Type. The two documented media types are accepted, with parameters. Stable error code: `unsupported_media_type`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Temporary-file creation, write, close, or publication failed; read-deadline enforcement or interrupted completion can also fail. No success receipt is issued. Stable error code: `delivery_failed`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Mailbox is closing, or all 16 global upload slots are owned. Stable error codes: `unavailable`, `upload_limit`.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "options": {
+        "operationId": "preflightMessages",
+        "summary": "Handle CORS preflight",
+        "description": "Returns before route, ID, method, media-type, or body validation. No registration or delivery file is created. The same response applies to OPTIONS on every path, including unknown and retired registrations; these three Path Items are not an exhaustive list of preflight paths. No request body is needed.",
+        "responses": {
+          "204": {
+            "$ref": "#/components/responses/Preflight"
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Path segment for this documented route. OPTIONS does not validate UUID syntax or registration existence; arbitrary segments are accepted.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RegistrationId": {
+        "type": "string",
+        "format": "uuid",
+        "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        "description": "Canonical lowercase RFC-variant UUIDv4 registration identity. This is a mailbox address, not an authentication credential. It is unrelated to the UUIDv7 used in delivery filenames.",
+        "examples": [
+          "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
+        ]
+      },
+      "RegistrationRequest": {
+        "type": "object",
+        "properties": {
+          "directory": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Existing absolute directory path in the daemon host filesystem. The caller creates it and supplies permissions; localpost neither creates nor repairs it. A temporary file write/close/remove probe must succeed. Successful validation cannot guarantee later writes. Use the native absolute path syntax of the host.",
+            "examples": [
+              "C:\\localpost-example\\inbox"
+            ]
+          }
+        },
+        "required": [
+          "directory"
+        ],
+        "additionalProperties": false
+      },
+      "Registration": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RegistrationId"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "Unregistration": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/RegistrationId"
+          },
+          "unregistered": {
+            "type": "boolean",
+            "const": true
+          },
+          "forced": {
+            "type": "boolean",
+            "description": "True when the grace deadline required interrupting remaining requests. It does not assert that filesystem cleanup finished within 30 seconds."
+          }
+        },
+        "required": [
+          "id",
+          "unregistered",
+          "forced"
+        ],
+        "additionalProperties": false
+      },
+      "Receipt": {
+        "type": "object",
+        "properties": {
+          "filename": {
+            "type": "string",
+            "pattern": "^localpost_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\.dat$",
+            "description": "Basename of the complete published file in the registered directory, using an RFC-variant UUIDv7. Never a path or registration ID.",
+            "examples": [
+              "localpost_019a4fb0-1a00-7000-8000-000000000001.dat"
+            ]
+          },
+          "bytes": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0,
+            "maximum": 10485760,
+            "description": "Number of opaque HTTP body bytes written to the file, after HTTP transfer framing is removed."
+          }
+        },
+        "required": [
+          "filename",
+          "bytes"
+        ],
+        "additionalProperties": false
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "enum": [
+                  "invalid_request",
+                  "invalid_directory",
+                  "invalid_registration_id",
+                  "not_found",
+                  "registration_not_found",
+                  "method_not_allowed",
+                  "request_timeout",
+                  "request_too_large",
+                  "unsupported_media_type",
+                  "delivery_failed",
+                  "unavailable",
+                  "registration_limit",
+                  "upload_limit"
+                ],
+                "description": "Stable application error identifier. Each operation response documents the codes applicable to its status."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human-readable detail. Wording is not a stable programmatic contract."
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "parameters": {
+      "RegistrationId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "description": "RFC-variant UUIDv4 in hyphenated form. Hex letters may be uppercase or lowercase; the daemon normalizes to lowercase. Route words remain case-sensitive. This validation applies to control/delivery operations; OPTIONS bypasses it.",
+        "schema": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+        },
+        "example": "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
+      }
+    },
+    "headers": {
+      "Access-Control-Allow-Origin": {
+        "description": "Permissive CORS for application responses; no origin registration.",
+        "schema": {
+          "type": "string",
+          "const": "*"
+        }
+      },
+      "Access-Control-Allow-Headers": {
+        "description": "The advertised allowed browser request header.",
+        "schema": {
+          "type": "string",
+          "const": "Content-Type"
+        }
+      },
+      "Access-Control-Allow-Methods": {
+        "description": "The shared listener advertises these methods on every application response.",
+        "schema": {
+          "type": "string",
+          "const": "POST, DELETE, OPTIONS"
+        }
+      }
+    },
+    "responses": {
+      "Preflight": {
+        "description": "CORS preflight accepted with no response body, no registration, and no delivery file. Applies to any path, independent of ID validity or registration existence.",
+        "headers": {
+          "Access-Control-Allow-Origin": {
+            "$ref": "#/components/headers/Access-Control-Allow-Origin"
+          },
+          "Access-Control-Allow-Headers": {
+            "$ref": "#/components/headers/Access-Control-Allow-Headers"
+          },
+          "Access-Control-Allow-Methods": {
+            "$ref": "#/components/headers/Access-Control-Allow-Methods"
+          }
+        }
+      }
+    }
+  }
+}
