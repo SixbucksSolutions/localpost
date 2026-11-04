@@ -7,6 +7,11 @@ localpost is the shared localhost HTTP-to-file delivery service described in
 Keep accepted decisions distinct from open implementation choices. Do not build
 project-local copies of shared services.
 
+Implement the daemon in **Go**, following `docs/adr/0006-go-implementation-language.md`.
+Use the standard library first; do not reopen the language choice without a new
+explicit decision. Toolchain version, packaging, release targets, and dependencies
+remain to be selected. The language ADR does not authorize implementation work.
+
 ## Development board
 
 Use the shared localswim implementation at `C:\Projects\localswim`.

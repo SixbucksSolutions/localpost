@@ -10,6 +10,10 @@ filesystem tools.
 **Status:** initial project and architecture documentation. The service is not
 implemented yet; commands below describe the intended interface.
 
+**Implementation language:** Go, with a standard-library-first approach and
+standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
+records the decision and the tradeoff against Rust.
+
 ## Why it exists
 
 An agent testing a web UI needs a direct way to receive browser diagnostics.

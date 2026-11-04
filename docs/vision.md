@@ -76,6 +76,8 @@ and exactly-once delivery are also outside this version's agreed scope.
 ## Current stage
 
 This repository establishes the vision and accepted decisions. There is no
-service implementation or supported installation command yet. The language,
-packaging, exact API routes, and remaining protocol details are open; see the
-[ADR ledger](adr/README.md).
+service implementation or supported installation command yet. **Go is the
+selected implementation language**, as recorded in
+[ADR 0006](adr/0006-go-implementation-language.md). Toolchain version, release
+packaging and targets, exact API routes, and remaining protocol details are
+open; see the [ADR ledger](adr/README.md).

@@ -3,6 +3,18 @@
 **Status:** intended architecture, not an implemented service. Accepted decisions
 are recorded in the [ADR ledger](adr/README.md).
 
+## Implementation language
+
+Implement the daemon in **Go**, with a standard-library-first approach and a
+standalone executable per supported target. [ADR 0006](adr/0006-go-implementation-language.md)
+records the choice over Rust and its maintenance tradeoffs. The exact toolchain
+version, release targets, packaging, and any required dependencies remain open.
+
+Go's HTTP and filesystem APIs provide building blocks, not proof of the delivery
+contract. In particular, atomic publication without overwriting another delivery
+must be verified on each supported OS; `os.Rename` alone is not a portable
+guarantee. Concurrency and shutdown still require explicit ownership and tests.
+
 ## Components and boundaries
 
 ```mermaid
@@ -151,5 +163,5 @@ The implementation should establish these properties before release:
 - Unregistration and process stop are bounded and preserve completed deliveries.
 - Restart restores no registrations; ports remain unprivileged and loopback-only.
 
-Language, packaging, platform support, full HTTP conformance, and the concrete
-test harness are intentionally not selected by this architecture document.
+Go is selected by ADR 0006. Packaging, platform support, full HTTP conformance,
+and the concrete test harness remain open implementation decisions.
