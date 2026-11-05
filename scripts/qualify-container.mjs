@@ -83,7 +83,7 @@ try {
   assert.equal(labels['org.opencontainers.image.revision'], expectedCommit);
   assert.equal(labels['org.opencontainers.image.source'], 'https://github.com/SixbucksSolutions/localpost');
   assert.equal(labels['org.opencontainers.image.licenses'], 'MIT');
-  assert.equal(labels['io.localpost.packaging-revision'], process.env.GITHUB_SHA);
+  assert.equal(labels['io.localpost.packaging-revision'], process.env.PACKAGING_REVISION ?? process.env.GITHUB_SHA);
   assert.match(labels['io.localpost.packaging-revision'], /^[0-9a-f]{40}$/);
   const copyContainer = `${prefix}-copy`;
   containers.push(copyContainer);

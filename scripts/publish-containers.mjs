@@ -64,13 +64,17 @@ export function checkPromotionSource(run, jobs, repository, runId, packagingRevi
   assert.equal(run.status, 'completed');
   assert.equal(run.conclusion, 'failure');
   const expected = new Map([
-    ['qualify (ubuntu-26.04, amd64)', 'success'],
-    ['qualify (ubuntu-26.04-arm, arm64)', 'success'],
     ['publish', 'success'],
     ['anonymous (ubuntu-26.04, amd64)', 'success'],
     ['anonymous (ubuntu-26.04-arm, arm64)', 'success'],
     ['promote', 'failure'],
   ]);
+  if (jobs.jobs.some((job) => job.name === 'qualify')) {
+    expected.set('qualify', 'skipped');
+  } else {
+    expected.set('qualify (ubuntu-26.04, amd64)', 'success');
+    expected.set('qualify (ubuntu-26.04-arm, arm64)', 'success');
+  }
   assert.equal(jobs.total_count, expected.size);
   assert.equal(jobs.jobs.length, expected.size);
   for (const job of jobs.jobs) {
@@ -79,6 +83,55 @@ export function checkPromotionSource(run, jobs, repository, runId, packagingRevi
     assert.ok(expected.delete(job.name), 'Unexpected or duplicate source job');
   }
   assert.equal(expected.size, 0);
+}
+
+export function checkQualifiedRecord(candidate, runId) {
+  assert.match(runId, /^[1-9][0-9]*$/);
+  const record = candidate.containerQualification;
+  assert.ok(record, 'Accepted container qualification is required');
+  assert.equal(String(record.runId), runId);
+  assert.match(record.packagingCommit, /^[0-9a-f]{40}$/);
+  for (const architecture of ['amd64', 'arm64']) assert.match(record.imageIds?.[architecture], digestPattern);
+  return record;
+}
+
+export function checkQualificationSource(run, jobs, repository, runId, record) {
+  assert.equal(repository.toLowerCase(), 'sixbuckssolutions/localpost');
+  assert.equal(String(record.runId), runId);
+  assert.equal(run.head_sha, record.packagingCommit);
+  assert.equal(String(run.id), runId);
+  assert.equal(run.repository.full_name.toLowerCase(), repository.toLowerCase());
+  assert.equal(run.path, '.github/workflows/publish-containers.yml');
+  assert.equal(run.event, 'workflow_dispatch');
+  assert.equal(run.status, 'completed');
+  assert.equal(run.conclusion, 'success');
+  const expected = new Map([
+    ['qualify (ubuntu-26.04, amd64)', 'success'],
+    ['qualify (ubuntu-26.04-arm, arm64)', 'success'],
+    ['publish', 'skipped'],
+    ['anonymous', 'skipped'],
+    ['promote', 'skipped'],
+  ]);
+  assert.equal(jobs.total_count, expected.size);
+  assert.equal(jobs.jobs.length, expected.size);
+  for (const job of jobs.jobs) {
+    assert.equal(job.status, 'completed');
+    assert.equal(job.conclusion, expected.get(job.name), 'Source must be a successful qualification-only run');
+    assert.ok(expected.delete(job.name), 'Unexpected or duplicate source job');
+  }
+  assert.equal(expected.size, 0);
+}
+
+export function checkQualifiedImage(local, identity, architecture, packagingCommit, sourceCommit, acceptedImageId) {
+  assert.equal(identity.architecture, architecture);
+  assert.match(identity.imageId, digestPattern);
+  if (acceptedImageId !== undefined) assert.equal(identity.imageId, acceptedImageId);
+  assert.equal(local.Id, identity.imageId);
+  assert.equal(local.Architecture, architecture);
+  assert.equal(local.Os, 'linux');
+  assert.equal(local.Config.Labels['org.opencontainers.image.version'], version);
+  assert.equal(local.Config.Labels['org.opencontainers.image.revision'], sourceCommit);
+  assert.equal(local.Config.Labels['io.localpost.packaging-revision'], packagingCommit);
 }
 
 export function checkPublicationPolicy(candidate, optIn) {
@@ -91,9 +144,25 @@ export function checkPublicationPolicy(candidate, optIn) {
 export async function main(mode = process.argv[2]) {
   const root = path.join(process.env.RUNNER_TEMP, 'container-publication');
   await mkdir(root, { recursive: true });
-  if (['publish', 'promote', 'resume-check'].includes(mode)) {
-    const candidate = JSON.parse(await readFile('release/0.2.0-candidate.json'));
-    checkPublicationPolicy(candidate, process.env.PUBLISH_CONTAINERS);
+  const candidateManifest = JSON.parse(await readFile('release/0.2.0-candidate.json'));
+  if (['publish', 'promote', 'resume-check', 'qualified-check'].includes(mode)) {
+    checkPublicationPolicy(candidateManifest, process.env.PUBLISH_CONTAINERS);
+  }
+  const qualifiedRunId = process.env.QUALIFIED_RUN_ID || '';
+  const qualification = qualifiedRunId ? checkQualifiedRecord(candidateManifest, qualifiedRunId) : undefined;
+  if (qualifiedRunId) assert.equal(process.env.PROMOTE_RUN_ID || '', '', 'Qualification reuse and promotion recovery are separate modes');
+  const packagingCommit = qualification?.packagingCommit ?? process.env.GITHUB_SHA;
+  if (mode === 'qualified-check') {
+    assert.ok(qualification, 'A qualified run ID is required');
+    const repository = process.env.GITHUB_REPOSITORY;
+    assert.equal(repository.toLowerCase(), 'sixbuckssolutions/localpost');
+    const endpoint = `repos/${repository}/actions/runs/${qualifiedRunId}`;
+    const query = async (route) => JSON.parse((await execute('gh', ['api', route], { timeout: 30000, maxBuffer: 1024 * 1024 })).stdout);
+    const run = await query(endpoint);
+    const jobs = await query(`${endpoint}/jobs?filter=latest&per_page=100`);
+    checkQualificationSource(run, jobs, repository, qualifiedRunId, qualification);
+    console.log(`Verified accepted qualification source ${qualifiedRunId}.`);
+    return;
   }
   if (mode === 'resume-check') {
     const runId = process.env.PROMOTE_RUN_ID;
@@ -117,10 +186,7 @@ export async function main(mode = process.argv[2]) {
       assert.match(identity.imageId, digestPattern);
       await docker('load', '--input', path.join(directory, 'image.tar'));
       const [local] = JSON.parse(await docker('image', 'inspect', `localpost-qualified:${architecture}`));
-      assert.equal(local.Id, identity.imageId);
-      assert.equal(local.Architecture, architecture);
-      assert.equal(local.Config.Labels['org.opencontainers.image.version'], version);
-      assert.equal(local.Config.Labels['io.localpost.packaging-revision'], process.env.GITHUB_SHA);
+      checkQualifiedImage(local, identity, architecture, packagingCommit, candidateManifest.sourceCommit, qualification?.imageIds[architecture]);
       const tag = `${image}:candidate-${process.env.GITHUB_RUN_ID}-${architecture}`;
       await docker('tag', identity.imageId, tag);
       await docker('push', tag);
@@ -129,9 +195,9 @@ export async function main(mode = process.argv[2]) {
       checkImageIdentity(identity.imageId, { platformDigest: remote.digest, configDigest });
       platforms[architecture] = { digest: remote.digest, configDigest, imageId: identity.imageId };
     }
-    const candidate = `${image}:candidate-${process.env.GITHUB_RUN_ID}`;
-    await docker('buildx', 'imagetools', 'create', '--tag', candidate, ...Object.values(platforms).map((item) => `${image}@${item.digest}`));
-    const index = await inspect(candidate);
+    const candidateReference = `${image}:candidate-${process.env.GITHUB_RUN_ID}`;
+    await docker('buildx', 'imagetools', 'create', '--tag', candidateReference, ...Object.values(platforms).map((item) => `${image}@${item.digest}`));
+    const index = await inspect(candidateReference);
     checkIndex(index, platforms);
     const existing = await inspect(`${image}:${version}`, true);
     if (existing) {
@@ -143,7 +209,7 @@ export async function main(mode = process.argv[2]) {
     const published = await inspect(`${image}:${version}`);
     assert.equal(published.digest, index.digest);
     checkIndex(published, platforms);
-    await writeFile(path.join(root, 'publication.json'), JSON.stringify({ image, version, indexDigest: index.digest, platforms }, null, 2));
+    await writeFile(path.join(root, 'publication.json'), JSON.stringify({ image, version, packagingCommit, indexDigest: index.digest, platforms }, null, 2));
     console.log(`Version index published: ${image}:${version}@${index.digest}`);
   } else if (mode === 'verify' || mode === 'promote') {
     const publication = JSON.parse(await readFile(path.join(root, 'publication.json')));
@@ -154,6 +220,8 @@ export async function main(mode = process.argv[2]) {
     assert.equal(published.digest, publication.indexDigest);
     checkIndex(published, publication.platforms);
     if (mode === 'verify') {
+      assert.equal(publication.packagingCommit, packagingCommit);
+      assert.match(publication.packagingCommit, /^[0-9a-f]{40}$/);
       const architecture = process.env.ARCHITECTURE;
       assert.ok(['amd64', 'arm64'].includes(architecture));
       assert.equal(process.arch, architecture === 'amd64' ? 'x64' : 'arm64');
@@ -166,7 +234,7 @@ export async function main(mode = process.argv[2]) {
         indexDigest: publication.indexDigest,
       });
       assert.ok(local.RepoDigests.includes(`${image}@${publication.indexDigest}`));
-      if (process.env.GITHUB_ENV) await writeFile(process.env.GITHUB_ENV, `CONTAINER_IMAGE=${image}@${publication.indexDigest}\n`, { flag: 'a' });
+      if (process.env.GITHUB_ENV) await writeFile(process.env.GITHUB_ENV, `CONTAINER_IMAGE=${image}@${publication.indexDigest}\nPACKAGING_REVISION=${publication.packagingCommit}\n`, { flag: 'a' });
       await writeFile(path.join(root, `anonymous-${architecture}.json`), JSON.stringify({ passed: true, architecture, indexDigest: publication.indexDigest, platformDigest: publication.platforms[architecture].digest, configDigest: publication.platforms[architecture].configDigest, imageId: local.Id }, null, 2));
       console.log(`Anonymous native pull verified for ${architecture}.`);
     } else {
