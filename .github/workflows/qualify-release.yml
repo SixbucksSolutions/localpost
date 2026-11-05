@@ -1,0 +1,113 @@
+name: Qualify accepted release candidate
+
+on:
+  push:
+    paths:
+      - 'scripts/qualify-packaged-service*'
+      - release/0.1.0-candidate.json
+      - .github/workflows/qualify-release.yml
+  pull_request:
+    paths:
+      - 'scripts/qualify-packaged-service*'
+      - release/0.1.0-candidate.json
+      - .github/workflows/qualify-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  linux:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out qualification harness
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up check runtimes
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - name: Set up source-test Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Download the accepted candidate
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: 41950300326
+          name: localpost-0.1.0-852b8a9ded0d03e98cada5810b18c92746848545
+          path: ${{ runner.temp }}/candidate
+      - name: Verify and unpack existing artifacts
+        env:
+          CANDIDATE_DIR: ${{ runner.temp }}/candidate
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import assert from 'node:assert/strict';
+          import {createHash} from 'node:crypto';
+          const c=JSON.parse(fs.readFileSync('release/0.1.0-candidate.json'));
+          for(const a of c.assets) assert.equal(createHash('sha256').update(fs.readFileSync(path.join(process.env.CANDIDATE_DIR,a.name))).digest('hex'),a.sha256);
+          JS
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar -xzf "$CANDIDATE_DIR/localpost_0.1.0_linux_amd64.tar.gz" -C "$RUNNER_TEMP/unpacked"
+          git diff --exit-code 852b8a9ded0d03e98cada5810b18c92746848545 -- cmd/localpost go.mod .go-version
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Qualify the packaged Linux executable
+        run: |
+          . /etc/os-release
+          test "$ID" = ubuntu
+          test "$VERSION_ID" = 26.04
+          test "$(id -u)" != 0
+          package="$RUNNER_TEMP/unpacked/localpost_0.1.0_linux_amd64"
+          binary="$package/localpost"
+          env PATH= "$binary" --port 53151 >"$RUNNER_TEMP/override.log" 2>&1 &
+          override_pid=$!
+          env PATH= "$binary" >"$RUNNER_TEMP/default.log" 2>&1 &
+          default_pid=$!
+          trap 'kill -INT "$override_pid" "$default_pid" 2>/dev/null || true; sleep 1; kill "$override_pid" "$default_pid" 2>/dev/null || true; wait 2>/dev/null || true' EXIT
+          for port in 53151 53147; do
+            ready=0
+            for _ in {1..40}; do
+              if curl --silent --output /dev/null --connect-timeout 1 "http://127.0.0.1:$port/"; then ready=1; break; fi
+              sleep 0.1
+            done
+            test "$ready" = 1
+          done
+          kill -0 "$override_pid" "$default_pid"
+          if env PATH= "$binary" >"$RUNNER_TEMP/conflict.log" 2>&1; then echo 'Occupied default port was accepted' >&2; exit 1; fi
+          grep -q '127.0.0.1:53147' "$RUNNER_TEMP/conflict.log"
+          node scripts/qualify-packaged-service.mjs --package-dir "$package" --base-url http://127.0.0.1:53151 --expected-commit 852b8a9ded0d03e98cada5810b18c92746848545 --evidence "$RUNNER_TEMP/linux-qualification.json"
+          kill -INT "$override_pid" "$default_pid"
+          for _ in {1..50}; do
+            if ! kill -0 "$override_pid" 2>/dev/null && ! kill -0 "$default_pid" 2>/dev/null; then break; fi
+            sleep 0.1
+          done
+          if kill -0 "$override_pid" 2>/dev/null || kill -0 "$default_pid" 2>/dev/null; then echo 'SIGINT shutdown exceeded bound' >&2; exit 1; fi
+          wait "$override_pid"
+          wait "$default_pid"
+          trap - EXIT
+          {
+            printf 'uid=%s\n' "$(id -u)"
+            printf 'distribution=%s %s\n' "$ID" "$VERSION_ID"
+            uname -srmo
+            stat -f -c 'temporary-filesystem=%T' "${TMPDIR:-/tmp}"
+            printf 'mounted-filesystem=%s\n' "$(findmnt -n -o FSTYPE -T "${TMPDIR:-/tmp}")"
+            printf 'runtime-PATH=empty\nSIGINT-shutdown=passed\ndefault-and-override=passed\n'
+          } >"$RUNNER_TEMP/linux-host.txt"
+      - name: Reuse source collision checks
+        run: go test ./cmd/localpost -run '^TestMessageStorageFailures$' -count=1
+      - name: Retain qualification evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-release-qualification-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/linux-qualification.json
+            ${{ runner.temp }}/linux-host.txt
+          if-no-files-found: error

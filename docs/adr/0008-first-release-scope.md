@@ -16,10 +16,10 @@ contents are immutable; corrections require a new version.
 | Build target | Qualification environment | Archive |
 | --- | --- | --- |
 | `windows/amd64` | Windows 11 x64, local NTFS directory | `localpost_0.1.0_windows_amd64.zip` |
-| `linux/amd64` | Ubuntu 24.04 LTS x64; record the tested filesystem | `localpost_0.1.0_linux_amd64.tar.gz` |
+| `linux/amd64` | Ubuntu 26.04 LTS x64; record the tested filesystem | `localpost_0.1.0_linux_amd64.tar.gz` |
 
 The current development host is Windows 11 Pro, build 26200, with NTFS storage.
-Existing CI runs on Ubuntu 24.04 LTS x64. These are available qualification
+Earlier CI ran on Ubuntu 24.04 LTS x64. Terry updated the release qualification target to Ubuntu 26.04 LTS on 2026-11-04; current CI is being aligned to that target. These are available qualification
 environments, not evidence that release archives have already been tested.
 The Linux destination filesystem must be identified during M06.03; it has not
 yet been recorded. Support claims are limited to environments actually qualified.

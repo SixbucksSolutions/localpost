@@ -154,7 +154,7 @@ does not silently choose another port.
 ### Build release candidates
 
 The accepted [first-release scope](docs/adr/0008-first-release-scope.md) targets
-Windows 11 x64 and Ubuntu 24.04 x64. These support targets require qualification
+Windows 11 x64 and Ubuntu 26.04 x64. These support targets require qualification
 of the actual archives; cross-compilation alone is not release evidence.
 
 From a clean checkout, build the versioned candidates into a new or empty directory:

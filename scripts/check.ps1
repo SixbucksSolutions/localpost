@@ -53,7 +53,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Browser pilot tests failed.' }
     & node scripts/validate-openapi.mjs
     if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation failed. Run npm ci if dependencies are missing.' }
-    & node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs
+    & node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs scripts/qualify-packaged-service.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation tests failed.' }
     if ($ServiceUrl) {
         & node scripts/check-openapi-service.mjs $ServiceUrl

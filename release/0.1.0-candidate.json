@@ -1,0 +1,22 @@
+{
+  "version": "0.1.0",
+  "tag": "v0.1.0",
+  "sourceCommit": "852b8a9ded0d03e98cada5810b18c92746848545",
+  "artifactRunId": 41950300326,
+  "artifactId": 13380751806,
+  "artifactName": "localpost-0.1.0-852b8a9ded0d03e98cada5810b18c92746848545",
+  "publicationStatus": "unpublished",
+  "releaseNotes": "docs/releases/v0.1.0.md",
+  "assets": [
+    {
+      "name": "localpost_0.1.0_windows_amd64.zip",
+      "target": "windows/amd64",
+      "sha256": "182a4818942e40c78f9aab29fc729767036b34b55f9df66018be656b8d1b9b0e"
+    },
+    {
+      "name": "localpost_0.1.0_linux_amd64.tar.gz",
+      "target": "linux/amd64",
+      "sha256": "718627b68021e3f393774607c41dec186871eb97cd267ce5bc20eee5b26c641d"
+    }
+  ]
+}
