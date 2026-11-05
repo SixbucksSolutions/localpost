@@ -41,11 +41,11 @@ services:
     read_only: true
     # Stock CMD also starts Redis. Run only Webdis against the separate backend.
     entrypoint: ["/usr/local/bin/webdis"]
-    command: ["/etc/localpost-webdis.json"]
+    command: ["/etc/webdis.prod.json"]
     volumes:
       - type: bind
         source: ./webdis.json
-        target: /etc/localpost-webdis.json
+        target: /etc/webdis.prod.json
         read_only: true
         bind:
           create_host_path: false
