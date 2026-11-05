@@ -30,8 +30,25 @@
     "name": "SHA256SUMS"
   },
   "qualification": {
-    "status": "pending",
-    "note": "Exact reproducible candidate archives. Native platform, Windows SCM and retained-container qualification pending.",
-    "frozenUtc": "2026-11-05T17:14:07.8835875Z"
+    "status": "passed",
+    "note": "Fresh independent review passed. Exact archives qualified on six Linux environments, Windows 11, Windows SCM and both native container architectures. No OS reboot performed.",
+    "frozenUtc": "2026-11-05T17:14:07.8835875Z",
+    "verifiedUtc": "2026-11-05T17:17:01.0732894Z",
+    "runs": {
+      "containers": 42072628475,
+      "race": 42072331169,
+      "linuxArm64": 42072617048,
+      "reproducibleBuild": 42072331448,
+      "windowsService": 42072623034,
+      "linuxAmd64": 42072611097
+    }
+  },
+  "containerQualification": {
+    "imageIds": {
+      "arm64": "sha256:18799c5a83deaba7a7894cd457b83d3c7de6400e22764315b93f809212455141",
+      "amd64": "sha256:de9c1cf4ff951767c98c8f8d86ce196596065f2a8e8a995b44cc24f4a269e9e1"
+    },
+    "packagingCommit": "90a1e57be382ad64d866ee50ffb169a5ed0b87b5",
+    "runId": 42072628475
   }
 }
