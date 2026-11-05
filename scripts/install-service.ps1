@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidateSet('Install', 'Start', 'Stop', 'Uninstall')][string]$Action = 'Install',
-    [string]$PackageDirectory = (Split-Path -Parent $PSScriptRoot),
+    [string]$PackageDirectory = '',
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_-]{0,63}$')][string]$ServiceName = 'localpost',
     [string]$InstallRoot = "$env:ProgramFiles\localpost\0.2.0",
     [string]$MailboxRoot = "$env:ProgramData\localpost\mailboxes",
@@ -10,6 +10,9 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($Action -eq 'Install' -and -not $PackageDirectory) {
+    $PackageDirectory = Split-Path -Parent $PSScriptRoot
+}
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 if (-not ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     throw 'Run this script from an elevated PowerShell session.'
