@@ -14,10 +14,18 @@ function compose(...args) {
   return execFileSync('docker', ['compose', '-p', project, '-f', file, ...args],
     {env, encoding: 'utf8', timeout: 300_000});
 }
-async function command(path, method = 'GET', body) {
-  const response = await fetch(`${base}/${path}`, {method, body, signal: AbortSignal.timeout(5000)});
+async function command(commandPath, method = 'GET', body) {
+  const segments = commandPath.split('/');
+  const encodedPath = segments.map(segment => encodeURIComponent(segment)).join('/');
+  const response = await fetch(`${base}/${encodedPath}`, {method, body, signal: AbortSignal.timeout(5000)});
   assert.equal(response.status, 200);
-  return response.json();
+  const result = await response.json();
+  const reply = result[segments[0]];
+  if (Array.isArray(reply) && reply[0] === false) {
+    evidence.nativeError = {command: segments[0], reply: JSON.stringify(reply).slice(0, 512)};
+    throw new Error(`Webdis rejected qualification command ${segments[0]}`);
+  }
+  return result;
 }
 async function ready() {
   let lastResponse;
