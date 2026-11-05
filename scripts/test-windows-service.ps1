@@ -2,6 +2,10 @@
 param([Parameter(Mandatory)][string]$PackageDirectory)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$testIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+if (-not ([Security.Principal.WindowsPrincipal]::new($testIdentity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Windows service qualification requires an elevated administrator token.'
+}
 $runId = [guid]::NewGuid().ToString('N')
 $root = Join-Path $env:ProgramData "localpost-ci-$runId"
 $install = Join-Path $root 'service'
@@ -37,17 +41,21 @@ try {
     $unsafeAcl = Get-Acl -LiteralPath $unsafe
     $unsafeAcl.SetOwner([Security.Principal.WindowsIdentity]::GetCurrent().User)
     Set-Acl -LiteralPath $unsafe -AclObject $unsafeAcl
-    $rejected = $false
+    $fixtureOwner = (Get-Acl -LiteralPath $unsafe).GetOwner([Security.Principal.SecurityIdentifier]).Value
+    $expectedOwner = $testIdentity.User.Value
+    Assert ($fixtureOwner -eq $expectedOwner) "User-owned fixture owner differs from requested SID. Expected $expectedOwner, observed $fixtureOwner."
+    Assert ($fixtureOwner -notin @('S-1-5-18', 'S-1-5-32-544', 'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464')) 'User-owned fixture unexpectedly uses a trusted service-code owner.'
+    $rejectionMessage = 'installer returned successfully'
     try { & $installer -InstallRoot $unsafe -MailboxRoot $mailboxes -ServiceName $name -PackageDirectory $PackageDirectory -Port $port }
-    catch { $rejected = $_.Exception.Message -like 'Untrusted service path owner:*' }
-    Assert $rejected 'Installer accepted a user-owned code directory.'
+    catch { $rejectionMessage = "$($_.FullyQualifiedErrorId): $($_.Exception.Message)" }
+    Assert ($rejectionMessage -like '*Untrusted service path owner:*') "Expected user-owned code directory rejection. Actual result was $rejectionMessage"
     $unsafeAcl.SetOwner([Security.Principal.SecurityIdentifier]::new('S-1-5-32-544'))
     $unsafeAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'), 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
     Set-Acl -LiteralPath $unsafe -AclObject $unsafeAcl
-    $rejected = $false
+    $rejectionMessage = 'installer returned successfully'
     try { & $installer -InstallRoot (Join-Path $unsafe 'child') -MailboxRoot $mailboxes -ServiceName $name -PackageDirectory $PackageDirectory -Port $port }
-    catch { $rejected = $_.Exception.Message -like 'Untrusted service path write/delete permissions:*' }
-    Assert $rejected 'Installer accepted a replaceable code ancestor.'
+    catch { $rejectionMessage = "$($_.FullyQualifiedErrorId): $($_.Exception.Message)" }
+    Assert ($rejectionMessage -like '*Untrusted service path write/delete permissions:*') "Expected replaceable code ancestor rejection. Actual result was $rejectionMessage"
     & $installer @args -PackageDirectory $PackageDirectory -Port $port
     $service = Get-CimInstance Win32_Service -Filter "Name='$name'"
     Assert ($service.StartMode -eq 'Auto') 'Service is not configured for automatic boot startup.'
