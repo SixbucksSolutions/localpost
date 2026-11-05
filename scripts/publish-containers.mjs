@@ -30,6 +30,20 @@ const inspect = async (reference, optional = false) => {
     throw error;
   }
 };
+// Docker stores expose either the config, platform manifest, or pulled index as Id.
+// Every accepted value must be tied to the exact registry descriptors being verified.
+export function checkImageIdentity(imageId, { platformDigest, configDigest, indexDigest }) {
+  assert.match(imageId, digestPattern);
+  assert.match(platformDigest, digestPattern);
+  assert.match(configDigest, digestPattern);
+  const accepted = [platformDigest, configDigest];
+  if (indexDigest !== undefined) {
+    assert.match(indexDigest, digestPattern);
+    accepted.push(indexDigest);
+  }
+  assert.ok(accepted.includes(imageId), 'Image ID does not match the verified config, platform manifest or index');
+}
+
 export const checkIndex = (index, platforms) => {
   assert.ok(['application/vnd.oci.image.index.v1+json', 'application/vnd.docker.distribution.manifest.list.v2+json'].includes(index.raw.mediaType));
   assert.equal(index.raw.manifests.length, 2);
@@ -57,8 +71,9 @@ export async function main(mode = process.argv[2]) {
       await docker('tag', identity.imageId, tag);
       await docker('push', tag);
       const remote = await inspect(tag);
-      assert.equal(remote.raw.config.digest, identity.imageId);
-      platforms[architecture] = { digest: remote.digest, imageId: identity.imageId };
+      const configDigest = remote.raw.config?.digest;
+      checkImageIdentity(identity.imageId, { platformDigest: remote.digest, configDigest });
+      platforms[architecture] = { digest: remote.digest, configDigest, imageId: identity.imageId };
     }
     const candidate = `${image}:candidate-${process.env.GITHUB_RUN_ID}`;
     await docker('buildx', 'imagetools', 'create', '--tag', candidate, ...Object.values(platforms).map((item) => `${image}@${item.digest}`));
@@ -91,10 +106,14 @@ export async function main(mode = process.argv[2]) {
       await docker('pull', `${image}@${publication.indexDigest}`);
       const [local] = JSON.parse(await docker('image', 'inspect', `${image}@${publication.indexDigest}`));
       assert.equal(local.Architecture, architecture);
-      assert.equal(local.Id, publication.platforms[architecture].imageId);
+      checkImageIdentity(local.Id, {
+        platformDigest: publication.platforms[architecture].digest,
+        configDigest: publication.platforms[architecture].configDigest,
+        indexDigest: publication.indexDigest,
+      });
       assert.ok(local.RepoDigests.includes(`${image}@${publication.indexDigest}`));
       if (process.env.GITHUB_ENV) await writeFile(process.env.GITHUB_ENV, `CONTAINER_IMAGE=${image}@${publication.indexDigest}\n`, { flag: 'a' });
-      await writeFile(path.join(root, `anonymous-${architecture}.json`), JSON.stringify({ passed: true, architecture, indexDigest: publication.indexDigest, platformDigest: publication.platforms[architecture].digest, imageId: local.Id }, null, 2));
+      await writeFile(path.join(root, `anonymous-${architecture}.json`), JSON.stringify({ passed: true, architecture, indexDigest: publication.indexDigest, platformDigest: publication.platforms[architecture].digest, configDigest: publication.platforms[architecture].configDigest, imageId: local.Id }, null, 2));
       console.log(`Anonymous native pull verified for ${architecture}.`);
     } else {
       for (const architecture of ['amd64', 'arm64']) {
@@ -103,6 +122,12 @@ export async function main(mode = process.argv[2]) {
         assert.equal(result.architecture, architecture);
         assert.equal(result.indexDigest, publication.indexDigest);
         assert.equal(result.platformDigest, publication.platforms[architecture].digest);
+        assert.equal(result.configDigest, publication.platforms[architecture].configDigest);
+        checkImageIdentity(result.imageId, {
+          platformDigest: result.platformDigest,
+          configDigest: result.configDigest,
+          indexDigest: result.indexDigest,
+        });
       }
       await docker('buildx', 'imagetools', 'create', '--tag', `${image}:latest`, `${image}@${publication.indexDigest}`);
       assert.equal((await inspect(`${image}:latest`)).digest, publication.indexDigest);

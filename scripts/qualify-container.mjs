@@ -64,6 +64,7 @@ try {
     architecture: process.arch,
     uid: process.getuid(),
     filesystemType: String((await statfs(root)).type),
+    filesystem: (await execute('findmnt', ['-n', '-o', 'FSTYPE', '-T', root], { timeout: 5000, maxBuffer: 4096 })).stdout.trim(),
     docker: await docker('version', '--format', 'client={{.Client.Version}} server={{.Server.Version}}'),
   };
   phase = 'image-inspect';

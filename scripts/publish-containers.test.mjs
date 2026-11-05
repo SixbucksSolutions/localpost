@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkIndex, isMissingManifest } from './publish-containers.mjs';
+import { checkImageIdentity, checkIndex, isMissingManifest } from './publish-containers.mjs';
 
 const reference = 'ghcr.io/sixbuckssolutions/localpost:0.1.0';
 test('missing version permits only recognized manifest absence', () => {
@@ -35,4 +35,21 @@ test('index requires exactly the accepted native platform digests', () => {
   const wrong = structuredClone(index);
   wrong.raw.manifests[0].platform.os = 'windows';
   assert.throws(() => checkIndex(wrong, platforms));
+});
+
+test('image identity accepts only verified Docker store representations', () => {
+  const platformDigest = `sha256:${'a'.repeat(64)}`;
+  const configDigest = `sha256:${'b'.repeat(64)}`;
+  const indexDigest = `sha256:${'c'.repeat(64)}`;
+  const unrelated = `sha256:${'d'.repeat(64)}`;
+  const platform = { platformDigest, configDigest };
+  checkImageIdentity(platformDigest, platform);
+  checkImageIdentity(configDigest, platform);
+  assert.throws(() => checkImageIdentity(indexDigest, platform));
+  const pulled = { ...platform, indexDigest };
+  for (const id of [platformDigest, configDigest, indexDigest]) checkImageIdentity(id, pulled);
+  assert.throws(() => checkImageIdentity(unrelated, pulled));
+  assert.throws(() => checkImageIdentity('not-a-digest', pulled));
+  assert.throws(() => checkImageIdentity(platformDigest, { platformDigest }));
+  assert.throws(() => checkImageIdentity(platformDigest, { ...platform, indexDigest: 'invalid' }));
 });
