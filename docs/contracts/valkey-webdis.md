@@ -1,8 +1,8 @@
 # Valkey and Webdis client contract
 
 Contract revision 2, 2026-11-05. Implementation scope for #0046 under epic #0045.
-The approved adoption direction is recorded in [ADR 0012](../adr/0012-in-memory-http-mailboxes.md)
-and the [#0043 study](../studies/0043-in-memory-message-brokers.md).
+The approved adoption direction is recorded in [ADR 0012](https://github.com/SixbucksSolutions/localpost/blob/3a6ac98f4b053d5cdf5111a248e40a5faeb21668/docs/adr/0012-in-memory-http-mailboxes.md)
+and the [#0043 study](https://github.com/SixbucksSolutions/localpost/blob/3a6ac98f4b053d5cdf5111a248e40a5faeb21668/docs/studies/0043-in-memory-message-brokers.md).
 
 ## Components and endpoint
 

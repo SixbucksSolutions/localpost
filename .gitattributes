@@ -9,3 +9,7 @@ go.mod text eol=lf
 # Validation snapshots are integrity-checked against upstream bytes.
 scripts/openapi-schemas/*.json -text
 scripts/openapi-schemas/LICENSE -text
+
+# Candidate profiles must match their archived bytes on every checkout.
+deploy/valkey-webdis/*.yaml text eol=lf
+deploy/valkey-webdis/*.json text eol=lf
