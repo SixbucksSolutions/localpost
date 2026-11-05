@@ -1,6 +1,6 @@
 # ADR 0012 — Prefer existing components for in-memory HTTP mailboxes
 
-- Status — Proposed for Terry review under #0043
+- Status — Accepted for adoption under epic #0045, cutover deferred
 - Date — 2026-11-05
 
 ## Recommendation
@@ -99,11 +99,10 @@ Exact commands, output framing, packaging and read/removal behavior belong in
 the API and CLI contract design. The CLI uses the daemon as the shared source
 of message state.
 
-## Handoff
+## Authorized adoption
 
-Approve or reject the memory-only direction, the immediate-loss tradeoff and
-the adoption candidate. Review the trade study before authorizing implementation.
-After approval, define the small retrieval, retention and removal contract,
-including a new API date if retaining the localpost HTTP contract, before
-implementation. A direct adoption uses its native broker protocol. Assess push against that
-contract only when a concrete latency or unattended-consumer need appears.
+Terry approved the Valkey plus Webdis recommendation on 2026-11-05 and
+commissioned epic #0045 through handoff. The implementation contract is
+[defined separately](../contracts/valkey-webdis.md). The existing shared service
+continues operating during isolated qualification. Customer notifications and
+shared cutover remain deferred until the solution is locked up.
