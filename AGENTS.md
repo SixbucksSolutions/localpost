@@ -11,8 +11,9 @@ Implement the daemon in **Go**, following `docs/adr/0006-go-implementation-langu
 Use the standard library first; do not reopen the language choice without a new
 explicit decision. Go 1.27.3 is the development toolchain, recorded in `.go-version`
 and selected explicitly by `scripts/check.ps1`. Run that script before handing off
-code changes. Packaging, release targets, and future dependencies remain to be
-selected. The language ADR does not authorize implementation work.
+code changes. The first-release scope is accepted in
+`docs/adr/0008-first-release-scope.md`; packaged-artifact qualification is still
+required. The language ADR does not authorize implementation work.
 
 The mandatory check includes pinned golangci-lint from `.golangci-version` and
 the curated rules in `.golangci.yml`, plus formatting, tests, vet, and build.
@@ -26,6 +27,13 @@ Install pinned OpenAPI validation development dependencies with
 validation and its tests; `-ServiceUrl http://127.0.0.1:53147` additionally checks
 an existing shared daemon using only temporary owned registrations. Preserve
 official schema snapshots and their recorded provenance when updating tooling.
+
+Build release candidates only from a clean, identified commit with
+`go run ./tools/release --version 0.1.0 --output <new-or-empty-directory>`.
+Preserve the exact candidate archives and checksums for qualification and later
+publication; do not rebuild or substitute artifacts after candidate acceptance.
+The candidate workflow builds twice to check reproducibility and does not publish
+a release or replace the shared daemon.
 
 Keep control APIs REST-oriented and JSON-based, including structured application
 errors with stable codes. Message-upload bodies remain opaque bytes; do not wrap

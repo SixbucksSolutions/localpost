@@ -13,7 +13,8 @@ its normal filesystem tools.
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. The browser pilot
 has completed a headless Chrome feedback-loop proof on Windows. Its OpenAPI
-contract is available above; release packaging remains in M06.
+contract is available above. Versioned candidate packaging is being prepared in
+M06; supported release qualification and publication remain pending.
 The M03 API uses one listener and UUIDv4-addressed registrations; the old
 per-registration ports are removed.
 
@@ -149,6 +150,29 @@ release packaging belongs to a later milestone.
 There is no configuration file. The shared listener uses an unprivileged TCP
 port on `127.0.0.1`. An occupied port causes startup to fail clearly; localpost
 does not silently choose another port.
+
+### Build release candidates
+
+The accepted [first-release scope](docs/adr/0008-first-release-scope.md) targets
+Windows 11 x64 and Ubuntu 24.04 x64. These support targets require qualification
+of the actual archives; cross-compilation alone is not release evidence.
+
+From a clean checkout, build the versioned candidates into a new or empty directory:
+
+```powershell
+$candidateDir = Join-Path $env:TEMP ('localpost-candidate-' + [guid]::NewGuid())
+go run ./tools/release --version 0.1.0 --output $candidateDir
+```
+
+The builder exports the identified Git commit, uses the pinned Go toolchain,
+and produces the two archives plus `SHA256SUMS`. Each archive includes its
+binary, offline instructions, licenses, canonical API contract and build
+manifest. `localpost --version` reports binary identity without opening a port;
+ordinary development builds report `dev` and `unknown`.
+
+The [candidate workflow](.github/workflows/release-candidate.yml) builds twice,
+compares checksums and retains one exact artifact set for later qualification.
+It does not create a public release or replace the running shared daemon.
 
 ## Registration API
 

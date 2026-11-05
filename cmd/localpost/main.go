@@ -19,7 +19,8 @@ import (
 const defaultPort = 53147
 
 type config struct {
-	port int
+	port        int
+	showVersion bool
 }
 
 func parseConfig(args []string, output io.Writer) (config, error) {
@@ -27,6 +28,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags := flag.NewFlagSet("localpost", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.IntVar(&cfg.port, "port", defaultPort, "TCP port (1024-65535)")
+	flags.BoolVar(&cfg.showVersion, "version", false, "Print version and exit")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
 	}
@@ -40,6 +42,9 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 }
 
 func run(ctx context.Context, cfg config, output io.Writer) error {
+	if cfg.showVersion {
+		return writeVersion(output)
+	}
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.port))
 	listener, err := net.Listen("tcp4", address)
 	if err != nil {

@@ -1,0 +1,61 @@
+name: Release candidate packages
+
+on:
+  push:
+    paths:
+      - 'tools/release/**'
+      - 'cmd/localpost/**'
+      - go.mod
+      - .go-version
+      - openapi.json
+      - LICENSE
+      - .github/workflows/release-candidate.yml
+  pull_request:
+    paths:
+      - 'tools/release/**'
+      - 'cmd/localpost/**'
+      - go.mod
+      - .go-version
+      - openapi.json
+      - LICENSE
+      - .github/workflows/release-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  packages:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up pinned Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Test packaging code
+        run: go test ./tools/release
+      - name: Build and compare candidate packages
+        run: |
+          go run ./tools/release --version 0.1.0 --output "$RUNNER_TEMP/localpost-package-a"
+          go run ./tools/release --version 0.1.0 --output "$RUNNER_TEMP/localpost-package-b"
+          diff -u "$RUNNER_TEMP/localpost-package-a/SHA256SUMS" "$RUNNER_TEMP/localpost-package-b/SHA256SUMS"
+          cd "$RUNNER_TEMP/localpost-package-a"
+          sha256sum --check SHA256SUMS
+      - name: Retain the candidate for qualification
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: localpost-0.1.0-${{ github.sha }}
+          path: ${{ runner.temp }}/localpost-package-a/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90

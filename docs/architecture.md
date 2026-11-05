@@ -200,9 +200,9 @@ The implementation should establish these properties before release:
 - Restart restores no registrations; the listener stays unprivileged and loopback-only.
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
-concurrency qualification tests, plus a Linux race-instrumented CI run. Packaging
-and release-platform scope remain later work. The
+concurrency qualification tests, plus a Linux race-instrumented CI run. Release
+artifact qualification and publication remain later work. The
 [browser pilot](../examples/browser-diagnostics/README.md) records its verified
 headless Chrome workflow; it does not establish cross-browser coverage.
-First-release targets and artifact/publication rules are proposed in
+First-release targets and artifact/publication rules are accepted in
 [ADR 0008](adr/0008-first-release-scope.md); release qualification is still pending.

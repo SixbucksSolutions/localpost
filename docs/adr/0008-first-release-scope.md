@@ -1,11 +1,11 @@
 # ADR 0008: First-release scope and publication gate
 
-- **Status:** Proposed; awaiting Terry's acceptance of M06.01.
+- **Status:** Accepted through Terry's completion of M06.01.
 - **Date:** 2026-11-04
 - **Authority:** M06.01 defines the release proposal. This record does not build,
   qualify, tag, publish, or upgrade anything.
 
-## Proposed release
+## Release scope
 
 Release **0.1.0**, tagged **v0.1.0**, through
 [GitHub Releases](https://github.com/SixbucksSolutions/localpost/releases).
