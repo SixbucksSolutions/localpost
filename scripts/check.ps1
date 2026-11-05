@@ -86,6 +86,8 @@ try {
     # change persistent Git trust. Release VCS stamping belongs to packaging.
     & go build -buildvcs=false -o bin/localpost.exe ./cmd/localpost
     if ($LASTEXITCODE -ne 0) { throw 'go build failed.' }
+    & go build -buildvcs=false -o bin/localpost-client.exe ./cmd/localpost-client
+    if ($LASTEXITCODE -ne 0) { throw 'client build failed.' }
 }
 finally {
     $env:GOTOOLCHAIN = $previousToolchain
