@@ -9,6 +9,8 @@ on:
       - .go-version
       - openapi.json
       - LICENSE
+      - scripts/install-service.ps1
+      - docs/windows-service.md
       - .github/workflows/release-candidate.yml
   pull_request:
     paths:
@@ -18,6 +20,8 @@ on:
       - .go-version
       - openapi.json
       - LICENSE
+      - scripts/install-service.ps1
+      - docs/windows-service.md
       - .github/workflows/release-candidate.yml
   workflow_dispatch:
 
