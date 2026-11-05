@@ -2,35 +2,36 @@
   "version": "0.2.0",
   "apiVersion": "2026-11-05",
   "tag": "v0.2.0",
-  "sourceCommit": "4415ca60b151f5123f94fb527d8a7daf18b0b410",
-  "artifactRunId": 42055362444,
-  "artifactId": 13428382307,
-  "artifactName": "localpost-0.2.0-4415ca60b151f5123f94fb527d8a7daf18b0b410",
+  "sourceCommit": "8783e38a27c6c07536c4c9e9c1d403b1cd39eb59",
+  "artifactRunId": 42065590010,
+  "artifactId": 13434151400,
+  "artifactName": "localpost-0.2.0-8783e38a27c6c07536c4c9e9c1d403b1cd39eb59",
   "publicationStatus": "candidate",
   "releaseNotes": "docs/releases/v0.2.0.md",
   "assets": [
     {
-      "name": "localpost_0.2.0_windows_amd64.zip",
       "target": "windows/amd64",
-      "sha256": "07837d8c9cbf15abb85a62b994638d2c05bc8b0d5d8d298cdf482c04519fc440"
+      "sha256": "9f0bce1037482b2b07e965810094fbeb9d41c0847a71cf543c01d1c194092073",
+      "name": "localpost_0.2.0_windows_amd64.zip"
     },
     {
-      "name": "localpost_0.2.0_linux_amd64.tar.gz",
       "target": "linux/amd64",
-      "sha256": "4866b3133b6dc70f72d08bee8e37e436abdbd6804761557b0ed0ccb53bac9378"
+      "sha256": "5eaa6173c4acd3c9a4bbb03f6745cf1cb647edfde46002bc365c6bfb8fc840ad",
+      "name": "localpost_0.2.0_linux_amd64.tar.gz"
     },
     {
-      "name": "localpost_0.2.0_linux_arm64.tar.gz",
       "target": "linux/arm64",
-      "sha256": "0745d363df8e352ea8be2ef0221f119ba51bf72d2adb3a77d16ce48efce43116"
+      "sha256": "025a0d680da411b0504ce12a5169bbb36e0d16188ab7b9fb8e392f9a2732c7dc",
+      "name": "localpost_0.2.0_linux_arm64.tar.gz"
     }
   ],
   "checksumFile": {
-    "sha256": "5f171250a7f867ad736eb383cfe2f591deef3718e6d7317aac9d88f4fd7252f6",
+    "sha256": "7e17362eea2e2f767b4766d9eb9fba2209011df2005a9fa437c6225727fd737f",
     "name": "SHA256SUMS"
   },
   "qualification": {
-    "note": "Provisional development artifacts for platform integration. Story 06 freezes and qualifies the final release candidate.",
-    "status": "development"
+    "note": "Final release archives frozen after reviewed implementation. Qualification is in progress.",
+    "frozenUtc": "2026-11-05T16:34:37.2846441+00:00",
+    "status": "pending"
   }
 }
