@@ -1,0 +1,36 @@
+{
+  "version": "0.2.0",
+  "apiVersion": "2026-11-05",
+  "tag": "v0.2.0",
+  "sourceCommit": "4415ca60b151f5123f94fb527d8a7daf18b0b410",
+  "artifactRunId": 42055362444,
+  "artifactId": 13428382307,
+  "artifactName": "localpost-0.2.0-4415ca60b151f5123f94fb527d8a7daf18b0b410",
+  "publicationStatus": "candidate",
+  "releaseNotes": "docs/releases/v0.2.0.md",
+  "assets": [
+    {
+      "name": "localpost_0.2.0_windows_amd64.zip",
+      "target": "windows/amd64",
+      "sha256": "07837d8c9cbf15abb85a62b994638d2c05bc8b0d5d8d298cdf482c04519fc440"
+    },
+    {
+      "name": "localpost_0.2.0_linux_amd64.tar.gz",
+      "target": "linux/amd64",
+      "sha256": "4866b3133b6dc70f72d08bee8e37e436abdbd6804761557b0ed0ccb53bac9378"
+    },
+    {
+      "name": "localpost_0.2.0_linux_arm64.tar.gz",
+      "target": "linux/arm64",
+      "sha256": "0745d363df8e352ea8be2ef0221f119ba51bf72d2adb3a77d16ce48efce43116"
+    }
+  ],
+  "checksumFile": {
+    "sha256": "5f171250a7f867ad736eb383cfe2f591deef3718e6d7317aac9d88f4fd7252f6",
+    "name": "SHA256SUMS"
+  },
+  "qualification": {
+    "note": "Provisional development artifacts for platform integration. Story 06 freezes and qualifies the final release candidate.",
+    "status": "development"
+  }
+}
