@@ -1,6 +1,6 @@
 # High-level architecture
 
-**Status:** v0.2.0 is released with a one-listener architecture. The executable, UUID-addressed mailbox
+**Status:** v0.2.1 is released with a one-listener architecture. The executable, UUID-addressed mailbox
 registration, message delivery, unregistration, and browser CORS are implemented.
 Bounded robustness qualification accompanies the core. A headless Chrome pilot
 has also exercised the browser-to-file diagnostic feedback loop on Windows.
@@ -45,7 +45,7 @@ from the per-registration-port prototype.
 There is no daemon configuration file, persistent registry, or separate database.
 Active requests, the listener, and registrations necessarily have in-memory state;
 "stateless" here means none of that state is recovered after process restart.
-In released v0.2.0, delivered files survive daemon restarts. Development v0.2.1
+In released v0.2.0, delivered files survive daemon restarts. v0.2.1
 removes all children of its dedicated mailbox root at every startup before HTTP
 serving begins and warns when entries exist. The root itself remains. The operator must
 ensure only one daemon uses the root, even across ports. There is no root lock.
@@ -169,7 +169,7 @@ so an old registration cannot abort a later request for a different one.
 
 Unregistration does not delete the mailbox directory or completed files. A normal
 process stop closes the listener with bounded network cleanup. A crash loses every
-registration; there is no restart recovery. In development v0.2.1, the next
+registration; there is no restart recovery. In v0.2.1, the next
 startup removes every root child after either stop or crash. Agents register again
 after a person restarts the daemon. Agents do not start it automatically or create
 a substitute collector.
@@ -213,7 +213,7 @@ The implementation should establish these properties before release:
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
 concurrency qualification tests, plus a Linux race-instrumented CI run. Release
-artifact qualification supports the [published v0.2.0 release](releases/v0.2.0.md). The
+artifact qualification supports the [published v0.2.1 release](releases/v0.2.1.md). The
 [browser pilot](../examples/browser-diagnostics/README.md) records its verified
 headless Chrome workflow; it does not establish cross-browser coverage.
 First-release targets and artifact/publication rules are recorded in

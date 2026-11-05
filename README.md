@@ -2,14 +2,14 @@
 
 A localhost post office for agents.
 
-**Latest release: [v0.2.0](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.2.0)** —
-[Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/localpost_0.2.0_windows_amd64.zip) ·
-[Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/localpost_0.2.0_linux_amd64.tar.gz) ·
-[Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/localpost_0.2.0_linux_arm64.tar.gz) ·
+**Latest release: [v0.2.1](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.2.1)** —
+[Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.1/localpost_0.2.1_windows_amd64.zip) ·
+[Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.1/localpost_0.2.1_linux_amd64.tar.gz) ·
+[Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.1/localpost_0.2.1_linux_arm64.tar.gz) ·
 [Container guide](docs/containers.md) ·
-[SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/SHA256SUMS)
+[SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.1/SHA256SUMS)
 
-The [v0.2.0 OpenAPI contract](https://github.com/SixbucksSolutions/localpost/blob/8783e38a27c6c07536c4c9e9c1d403b1cd39eb59/openapi.json) describes the released API.
+The [v0.2.1 OpenAPI contract](https://github.com/SixbucksSolutions/localpost/blob/5b5361b8d2afed46d25be4674fd670e9b3687513/openapi.json) describes the released API.
 The v0.1.0 release uses its [immutable API contract](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/openapi.json).
 
 localpost is one shared service that receives HTTP POST bodies and delivers them
@@ -17,17 +17,17 @@ unchanged as files in a service-created directory. An agent registers a mailbox,
 gets a UUIDv4 identity on the shared listener, and reads the resulting files with
 its normal filesystem tools.
 
-**Status:** v0.2.0 provides the shared loopback listener, service-created
+**Status:** v0.2.1 provides the shared loopback listener, service-created
 mailboxes, message delivery, unregistration and permissive CORS. Its qualified
 archives cover Windows and Linux on the environments listed in the
-[release notes](docs/releases/v0.2.0.md). The dated API is incompatible with
+[release notes](docs/releases/v0.2.1.md). The dated API is incompatible with
 v0.1.0. The headless Chrome pilot exercised a browser feedback loop on Windows.
 localpost is free and open-source software under the MIT license, provided as is
 without warranty. These good-faith tests carry no support commitment.
 [GitHub issues](https://github.com/SixbucksSolutions/localpost/issues) are welcome,
 with no guarantee of a response or fix.
 
-**Development:** v0.2.1 changes startup retention: every daemon start warns if the
+**Startup cleanup:** v0.2.1 changes startup retention: every daemon start warns if the
 dedicated mailbox root contains stale entries and removes all of its children
 before serving HTTP. The daemon reserves its port before cleanup, so an occupied
 port fails before any deletion. This applies after a normal stop or forced termination.
@@ -35,7 +35,7 @@ The root itself remains. Copy any needed data elsewhere before starting or
 restarting. Never put unrelated data in the root. The operator must ensure only
 one daemon uses a root, including across different ports. There is no root lock.
 DELETE still leaves files until the next start. The API date and routes remain unchanged. See the
-[pending v0.2.1 notes](docs/releases/v0.2.1.md). The released v0.2.0 retains
+[v0.2.1 release notes](docs/releases/v0.2.1.md). The released v0.2.0 retains
 mailbox contents across restart.
 
 **Implementation language:** Go, with a standard-library-first approach and
@@ -65,7 +65,7 @@ not start a replacement daemon or fall back to project-local collectors.
 
 ## Container deployment
 
-The published v0.2.0 image `ghcr.io/sixbuckssolutions/localpost:0.2.0`
+The published v0.2.1 image `ghcr.io/sixbuckssolutions/localpost:0.2.1`
 provides Linux AMD64 and ARM64 deployments. See the [container guide](docs/containers.md)
 for its operating instructions and qualification status. The
 [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/6889c8c/docs/containers.md)
@@ -184,7 +184,7 @@ does not silently choose another port.
 The original [first-release scope](docs/adr/0008-first-release-scope.md) targeted
 Windows 11 x64 and Ubuntu 26.04 x64. Additional Linux environments and ARM64 were
 tested using the exact archives. The current test matrix
-is in the [release notes](docs/releases/v0.2.0.md).
+is in the [release notes](docs/releases/v0.2.1.md).
 
 From a clean checkout, build the versioned candidates into a new or empty directory:
 
@@ -194,10 +194,11 @@ go run ./tools/release --version 0.2.1 --output $candidateDir
 ```
 
 Preserve published artifact bytes. A fresh local build does not replace a
-published asset. The v0.2.0 release contains the exact qualified archives.
+published asset. The v0.2.1 release contains the exact qualified archives.
 
 The builder exports the identified Git commit, uses the pinned Go toolchain,
-and by default produces the two AMD64 archives plus `SHA256SUMS`. Use
+and by default produces Windows AMD64, Linux AMD64 and Linux ARM64 archives
+plus `SHA256SUMS`. Use
 `--source-ref` and `--targets` to select a source revision and build targets.
 Each archive includes its
 binary, offline instructions, licenses, canonical API contract and build
@@ -220,7 +221,7 @@ gh workflow run certify-platforms.yml --field architecture=arm64
 
 | Wave | Environments |
 | --- | --- |
-| `amd64` | Ubuntu 24.04 and Alpine 3.24.3 |
+| `amd64` | Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 |
 | `arm64` | Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 |
 
 Ubuntu checks run directly on native-architecture GitHub-hosted VMs. Alpine
@@ -228,8 +229,7 @@ checks run in native-architecture containers on Ubuntu 26.04, sharing the host
 kernel and a bind-mounted filesystem. Evidence records the actual OS, kernel,
 filesystem and image digest. This scope covers Alpine userspace compatibility.
 
-Both waves use the frozen `release/0.2.1-candidate.json` artifact identity once
-the v0.2.1 candidate is prepared.
+Both waves use the frozen `release/0.2.1-candidate.json` artifact identity.
 They verify the candidate artifacts before publication or the matching public
 assets after publication.
 
@@ -239,9 +239,9 @@ byte-exact publication, disconnect cleanup, storage failures and graceful shutdo
 CI retains reports and checksums for 90 days. Successful runs provide review
 evidence of testing in the recorded environments.
 
-The v0.2.0 [AMD64](https://github.com/SixbucksSolutions/localpost/actions/runs/42065878731)
-and [ARM64](https://github.com/SixbucksSolutions/localpost/actions/runs/42065882862)
-certification runs passed. The [release notes](docs/releases/v0.2.0.md) describe
+The v0.2.1 [AMD64](https://github.com/SixbucksSolutions/localpost/actions/runs/42072611097)
+and [ARM64](https://github.com/SixbucksSolutions/localpost/actions/runs/42072617048)
+certification runs passed. The [release notes](docs/releases/v0.2.1.md) describe
 the tested environments and qualification evidence.
 
 ## Registration API
@@ -259,8 +259,7 @@ $inbox = $registration.directory
 A successful response contains `id` and `directory`. The ID is a UUIDv4 and
 is the basename of the absolute directory created beneath the configured root.
 There is no registration-specific port or process ID. Registrations disappear
-on restart. In released v0.2.0, directories and files remain. Development
-v0.2.1 removes all root children at the next startup.
+on restart. In released v0.2.0, directories and files remain. v0.2.1 removes all root children at the next startup.
 
 On POSIX, mailbox directories use `0700` and files use `0600`. Run the service
 and consuming agent under the same UID. On Windows, new directories and files
@@ -444,7 +443,7 @@ notifications are hints; agents should also reconcile directory contents.
 Unregistering stops new uploads, lets accepted uploads finish within the timeout,
 and removes that logical mailbox. Delivered files remain in place. localpost
 creates each destination directory. Released v0.2.0 retains these directories on
-restart. Development v0.2.1 reserves its port, deletes all root children, then
+restart. v0.2.1 reserves its port, deletes all root children, then
 serves HTTP.
 
 ## Migrating from v0.1.0
@@ -460,7 +459,7 @@ The v0.2.0 release uses dated routes and service-created directories.
   `unsupported_api_version` and name the supported prefix. There is no latest alias.
 - Re-register after restart. Old IDs do not survive. Retire a registration before
   removing its directory. In v0.2.0, deletion and restart preserve directories
-  and files. In development v0.2.1, deletion preserves them only until startup.
+  and files. In v0.2.1, deletion preserves them only until startup.
   Account for orphaned directories after lost responses and manage retention.
 
 The planned rollout includes migration notices to FGA Dev M08, localswim V2 Dev

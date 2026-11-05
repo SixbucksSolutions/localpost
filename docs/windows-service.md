@@ -12,7 +12,7 @@ account that consumes mailbox files.
 ```
 
 The defaults install the `localpost` service under
-`C:\Program Files\localpost\0.2.0`, provision
+`C:\Program Files\localpost\0.2.1`, provision
 `C:\ProgramData\localpost\mailboxes`, and listen on `127.0.0.1:53147`.
 `-ServiceName`, `-InstallRoot`, `-MailboxRoot`, and `-Port` support isolated
 installations. Paths must be absolute local paths with no reparse-point ancestors.
@@ -72,7 +72,7 @@ WinSW sends Ctrl+C to the daemon for graceful shutdown, with a 40-second stop
 budget. Windows shutdown must allow that budget. WinSW can terminate a process
 that exceeds it. Service failure triggers restart after 10 seconds. Registration
 IDs are in memory and become invalid after any restart. Released v0.2.0 retains
-delivered data on restart. Development v0.2.1 warns when the dedicated root
+delivered data on restart. v0.2.1 warns when the dedicated root
 contains entries and deletes all root children before serving HTTP, including on
 automatic restart after failure. The root itself remains. Clients register again using `POST /api/2026-11-05/registrations`
 with JSON `{}` and use the returned `id` and `directory`. Retirement with `DELETE`

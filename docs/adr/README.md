@@ -24,8 +24,7 @@ These are not additional accepted requirements:
 
 - First-release packaging and target qualification followed
   [ADR 0008](0008-first-release-scope.md). The published v0.1.0 release has
-  recorded qualification, as does the published v0.2.0 release. The v0.2.1
-  candidate requires its own qualification.
+  recorded qualification, as do the published v0.2.0 and v0.2.1 releases.
   Development uses Go 1.27.3 as recorded in `.go-version` and the README.
 - Remaining API refinements follow the dated routes and contract in
   [ADR 0010](0010-date-versioned-api.md) and the README.

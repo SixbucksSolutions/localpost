@@ -80,8 +80,8 @@ JSON mailbox registration, opaque message delivery, mailbox unregistration,
 and permissive browser CORS. The core has HTTP integration, bounded robustness,
 and race-instrumented verification. A headless Chrome demonstration on Windows
 has exercised diagnosis, correction, and rechecking through delivered files.
-The published [v0.2.0 release](releases/v0.2.0.md) has a recorded test matrix
-and provides the dated API and service-created mailboxes.
+The published [v0.2.1 release](releases/v0.2.1.md) has a recorded test matrix
+and provides the dated API, service-created mailboxes, and startup cleanup.
 **Go is the selected implementation language**, as recorded
 in [ADR 0006](adr/0006-go-implementation-language.md), with Go 1.27.3 selected for
 development. The accepted release packaging and target scope are recorded in

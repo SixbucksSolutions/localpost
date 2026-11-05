@@ -12,7 +12,7 @@ Use the standard library first; do not reopen the language choice without a new
 explicit decision. Go 1.27.3 is the development toolchain, recorded in `.go-version`
 and selected explicitly by `scripts/check.ps1`. Run that script before handing off
 code changes. The first-release scope is accepted in
-`docs/adr/0008-first-release-scope.md`. Both published v0.1.0 and v0.2.0 releases
+`docs/adr/0008-first-release-scope.md`. Published v0.1.0, v0.2.0 and v0.2.1 releases
 have recorded qualification. The language ADR does not authorize implementation
 work.
 
@@ -26,7 +26,7 @@ Fix substantive issues; explain any narrow intentional error discard or exceptio
 Install pinned OpenAPI validation development dependencies with
 `npm ci --ignore-scripts --no-audit --no-fund`. The normal check includes contract
 validation and its tests; `-ServiceUrl http://127.0.0.1:53147 -MailboxRoot <existing-absolute-root>`
-additionally checks an existing v0.2.0 daemon using temporary owned registrations. Preserve
+additionally checks an existing v0.2.1 daemon using temporary owned registrations. Preserve
 official schema snapshots and their recorded provenance when updating tooling.
 
 Build release candidates only from a clean, identified commit with
@@ -36,7 +36,7 @@ publication; do not rebuild or substitute artifacts after candidate acceptance.
 The candidate workflow builds twice to check reproducibility and does not publish
 a release or replace the shared daemon.
 
-For v0.2.1 development, use a dedicated existing absolute `--mailbox-root`:
+For v0.2.1, use a dedicated existing absolute `--mailbox-root`:
 every startup warns if it contains stale entries and deletes all children before
 HTTP serving begins, after normal stop or kill alike. Reserve the port first so
 an occupied port fails before deletion. The root remains. The operator must ensure that only one daemon uses a root,
@@ -49,10 +49,10 @@ may be created as needed. Never add write probes, lock files, metadata, state
 files, or daemon log files. Daemon diagnostics go to the console. Root write
 failures are discovered by cleanup or later mailbox and upload operations. The API remains `/api/2026-11-05`.
 
-For v0.2.0, the daemon requires an existing absolute `--mailbox-root`. Register
+For v0.2.1, the daemon requires an existing absolute `--mailbox-root`. Register
 with `{}` at `/api/2026-11-05/registrations` and use the returned `id` and
 `directory`. Retire registrations and clean up only owned mailboxes.
-The shared host now runs the published v0.2.0 executable.
+The shared host now runs the published v0.2.1 executable.
 
 Keep control APIs REST-oriented and JSON-based, including structured application
 errors with stable codes. Message-upload bodies remain opaque bytes; do not wrap
@@ -79,7 +79,7 @@ limit, and records ownership in the private `daemon-runtime.json`. Start that
 task with `Start-ScheduledTask` when its listener is absent. Keep its launcher,
 installed release executable and logs under the private runtime directory.
 
-The current task runs v0.2.0 with mailbox root
+The current task runs v0.2.1 with mailbox root
 `C:\Projects\localswim-state-store\localpost\.runtime\mailboxes`.
 Native Windows Service Control Manager installation is available through the
 packaged `scripts/install-service.ps1` but needs administrator elevation.

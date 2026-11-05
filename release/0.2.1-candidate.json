@@ -50,5 +50,17 @@
     },
     "packagingCommit": "90a1e57be382ad64d866ee50ffb169a5ed0b87b5",
     "runId": 42072628475
+  },
+  "containerPublication": {
+    "indexDigest": "sha256:91b9ce019dbd86181c2616a973af7200e1cfba7f8da9222593d06e9e8fe267f1",
+    "anonymousNativeArchitectures": [
+      "amd64",
+      "arm64"
+    ],
+    "tags": [
+      "0.2.1",
+      "latest"
+    ],
+    "runId": 42073388928
   }
 }
