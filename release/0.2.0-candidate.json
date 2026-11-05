@@ -30,8 +30,26 @@
     "name": "SHA256SUMS"
   },
   "qualification": {
-    "note": "Final release archives frozen after reviewed implementation. Qualification is in progress.",
-    "frozenUtc": "2026-11-05T16:34:37.2846441+00:00",
-    "status": "pending"
+    "note": "Independent review passed for the frozen archives, six Linux environments, Windows 11 console/Chrome, exact Windows SCM package, and retained native container images. Windows boot configuration was checked without rebooting.",
+    "frozenUtc": "2026-11-05T11:34:37.2846441-05:00",
+    "status": "passed",
+    "verifiedUtc": "2026-11-05T16:40:24.5984384+00:00",
+    "runs": {
+      "windowsService": 42066416058,
+      "containers": 42065893180,
+      "linuxPackage": 42065898398,
+      "linuxAmd64": 42065878731,
+      "reproducibleBuild": 42065590010,
+      "linuxArm64": 42065882862,
+      "race": 42065589856
+    }
+  },
+  "containerQualification": {
+    "packagingCommit": "0f0192739972bac87bd41f9fc944b0932b57e10c",
+    "imageIds": {
+      "amd64": "sha256:61caa9f0dbc6ca92932fab9b2fe4df272e4a8e46d227c7f842426f8f2f5b400d",
+      "arm64": "sha256:fb8dfdb539e52392ef32665ce960e4ae9f018478701747217aeae7da93e07601"
+    },
+    "runId": 42065893180
   }
 }
