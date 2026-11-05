@@ -217,6 +217,9 @@ runs provide review evidence; publishing additional release assets is a separate
 
 The [2026-11-05 AMD64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42028967680)
 passed for Ubuntu 24.04 and Alpine 3.24.3 using the published archive.
+The [2026-11-05 ARM64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42029293520)
+passed for Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 using the reproducible,
+unpublished test package from the original v0.1.0 source.
 
 ## Registration API
 
