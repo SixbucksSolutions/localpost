@@ -1,0 +1,37 @@
+{
+  "version": "0.2.1",
+  "apiVersion": "2026-11-05",
+  "tag": "v0.2.1",
+  "sourceCommit": "5b5361b8d2afed46d25be4674fd670e9b3687513",
+  "artifactRunId": 42072331448,
+  "artifactId": 13436752250,
+  "artifactName": "localpost-0.2.1-5b5361b8d2afed46d25be4674fd670e9b3687513",
+  "publicationStatus": "candidate",
+  "releaseNotes": "docs/releases/v0.2.1.md",
+  "assets": [
+    {
+      "target": "windows/amd64",
+      "name": "localpost_0.2.1_windows_amd64.zip",
+      "sha256": "e99011f1aa4066596ebda6bf1be44a1c345c566fdc05c8fa35d91706e649b947"
+    },
+    {
+      "target": "linux/amd64",
+      "name": "localpost_0.2.1_linux_amd64.tar.gz",
+      "sha256": "67601ebb889fe4106210d4531d1cf804544f72800699973536952b939aa0e552"
+    },
+    {
+      "target": "linux/arm64",
+      "name": "localpost_0.2.1_linux_arm64.tar.gz",
+      "sha256": "2d19ca6dc86c81d4e13e6f583fe7ed7a8b99a6cba5b1a22449e962ef7b9d9207"
+    }
+  ],
+  "checksumFile": {
+    "sha256": "2e77abb077c6b2133f5382529805b65de3f8ae71318dc7bef4c52c1db8dd3a8e",
+    "name": "SHA256SUMS"
+  },
+  "qualification": {
+    "status": "pending",
+    "note": "Exact reproducible candidate archives. Native platform, Windows SCM and retained-container qualification pending.",
+    "frozenUtc": "2026-11-05T17:14:07.8835875Z"
+  }
+}
