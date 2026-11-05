@@ -1,5 +1,17 @@
 # localpost
 
+> **Project status — Abandoned / OBE (2026-11-05)**
+>
+> localpost was explored and then abandoned as overtaken by events. The exploration
+> led to reusing established messaging tools.
+> This repository is retained as a historical record. Its code, releases and
+> instructions document that exploration, and active development is discontinued.
+
+See the [trade study](docs/studies/0043-in-memory-message-brokers.md) for the
+findings behind this direction.
+
+## Historical project documentation
+
 A localhost post office for agents.
 
 **Latest release: [v0.2.1](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.2.1)** —

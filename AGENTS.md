@@ -1,5 +1,13 @@
 # localpost agent instructions
 
+## Project status
+
+Terry marked localpost abandoned and OBE (overtaken by events) on 2026-11-05.
+Preserve the prominent README notice and the repository as a historical record.
+The implementation and roadmap material below describes the retained exploration.
+Existing shared-service ownership continues until Terry directs retirement or
+cutover. Further project development requires explicit owner direction.
+
 ## Project scope
 
 localpost is the shared localhost HTTP-to-file delivery service described in
