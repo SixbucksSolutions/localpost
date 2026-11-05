@@ -158,7 +158,7 @@ jobs:
         run: docker logout ghcr.io
 
   anonymous:
-    if: inputs.publish && inputs.promote_run_id == ''
+    if: always() && needs.publish.result == 'success' && inputs.publish && inputs.promote_run_id == ''
     needs: publish
     strategy:
       fail-fast: false

@@ -8,6 +8,14 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { checkImageIdentity, checkIndex, checkPromotionSource, checkPublicationPolicy, checkQualifiedRecord, checkQualificationSource, checkQualifiedImage, isMissingManifest } from './publish-containers.mjs';
 
+test('anonymous workflow job handles skipped qualification while requiring successful publication', async () => {
+  const workflow = await readFile(new URL('../.github/workflows/publish-containers.yml', import.meta.url), 'utf8');
+  const job = workflow.match(/^  anonymous:\r?\n    if: (.+)\r?\n    needs: (.+)/m);
+  assert.ok(job);
+  assert.equal(job[1].trim(), "always() && needs.publish.result == 'success' && inputs.publish && inputs.promote_run_id == ''");
+  assert.equal(job[2].trim(), 'publish');
+});
+
 const reference = 'ghcr.io/sixbuckssolutions/localpost:0.2.0';
 test('missing version permits only recognized manifest absence', () => {
   for (const stderr of [
