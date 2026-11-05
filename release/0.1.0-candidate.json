@@ -17,11 +17,21 @@
       "name": "localpost_0.1.0_linux_amd64.tar.gz",
       "target": "linux/amd64",
       "sha256": "718627b68021e3f393774607c41dec186871eb97cd267ce5bc20eee5b26c641d"
+    },
+    {
+      "name": "localpost_0.1.0_linux_arm64.tar.gz",
+      "target": "linux/arm64",
+      "sha256": "8cc9ce9c7e66ffa33ee28cf1b1648356b79acc8317b69fde737b00d4f5eb9e68",
+      "artifactRunId": 42029293520,
+      "artifactName": "unpublished-arm64-candidate-42029293520",
+      "builderCommit": "fad1eb8f94dee4c1b68c1d324d3d5fd0865fdcb0",
+      "publishedDate": "2026-11-05"
     }
   ],
   "checksumFile": {
     "name": "SHA256SUMS",
-    "sha256": "7015ab8a21ee4d3283fb2c36ff0365efe42c266d8ddd902d5a69c1b076feb1ea"
+    "sha256": "7ee23ba32aa228f54bb15df01c180264d6237609a85171060a5478648b69a89b",
+    "previousSHA256": "7015ab8a21ee4d3283fb2c36ff0365efe42c266d8ddd902d5a69c1b076feb1ea"
   },
   "qualification": {
     "status": "owner-accepted",
@@ -39,7 +49,59 @@
       "filesystem": "ext4",
       "uid": 1001,
       "initialRun": "https://github.com/SixbucksSolutions/localpost/actions/runs/41952049868"
-    }
+    },
+    "additionalPlatforms": [
+      {
+        "os": "Ubuntu 24.04 LTS",
+        "architecture": "amd64",
+        "filesystem": "ext4",
+        "uid": 1001,
+        "run": "https://github.com/SixbucksSolutions/localpost/actions/runs/42028967680",
+        "kernel": "7.0.0-1017-azure"
+      },
+      {
+        "os": "Alpine 3.24.3",
+        "architecture": "amd64",
+        "filesystem": "ext4",
+        "uid": 1001,
+        "run": "https://github.com/SixbucksSolutions/localpost/actions/runs/42028967680",
+        "scope": "native-architecture container userspace",
+        "hostOS": "Ubuntu 26.04 LTS",
+        "kernelScope": "shared host kernel",
+        "kernel": "7.0.0-1017-azure",
+        "image": "alpine:3.24.3",
+        "imageDigest": "sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+      },
+      {
+        "os": "Ubuntu 24.04 LTS",
+        "architecture": "arm64",
+        "filesystem": "ext4",
+        "uid": 1001,
+        "run": "https://github.com/SixbucksSolutions/localpost/actions/runs/42029293520",
+        "kernel": "7.0.0-1017-azure"
+      },
+      {
+        "os": "Ubuntu 26.04 LTS",
+        "architecture": "arm64",
+        "filesystem": "ext4",
+        "uid": 1001,
+        "run": "https://github.com/SixbucksSolutions/localpost/actions/runs/42029293520",
+        "kernel": "7.0.0-1017-azure"
+      },
+      {
+        "os": "Alpine 3.24.3",
+        "architecture": "arm64",
+        "filesystem": "ext4",
+        "uid": 1001,
+        "run": "https://github.com/SixbucksSolutions/localpost/actions/runs/42029293520",
+        "scope": "native-architecture container userspace",
+        "hostOS": "Ubuntu 26.04 LTS",
+        "kernelScope": "shared host kernel",
+        "kernel": "7.0.0-1017-azure",
+        "image": "alpine:3.24.3",
+        "imageDigest": "sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a"
+      }
+    ]
   },
   "releaseUrl": "https://github.com/SixbucksSolutions/localpost/releases/tag/v0.1.0",
   "releaseId": 434683066,

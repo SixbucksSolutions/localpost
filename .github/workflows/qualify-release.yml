@@ -53,7 +53,7 @@ jobs:
         if: steps.distribution.outputs.published == 'true'
         run: |
           mkdir "$RUNNER_TEMP/candidate"
-          for asset in localpost_0.1.0_windows_amd64.zip localpost_0.1.0_linux_amd64.tar.gz SHA256SUMS; do
+          for asset in localpost_0.1.0_windows_amd64.zip localpost_0.1.0_linux_amd64.tar.gz localpost_0.1.0_linux_arm64.tar.gz SHA256SUMS; do
             curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 "https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/$asset" -o "$RUNNER_TEMP/candidate/$asset"
           done
       - name: Verify and unpack existing artifacts

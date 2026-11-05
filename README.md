@@ -5,6 +5,7 @@ A localhost post office for agents.
 **Latest release: [v0.1.0](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.1.0)** —
 [Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_windows_amd64.zip) ·
 [Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_amd64.tar.gz) ·
+[Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_arm64.tar.gz) ·
 [SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/SHA256SUMS)
 
 **API reference: [OpenAPI 3.2.1 contract](openapi.json).**
@@ -18,9 +19,15 @@ its normal filesystem tools.
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. The browser pilot
 has completed a headless Chrome feedback-loop proof on Windows. Its OpenAPI
-contract is available above. Release v0.1.0 is published for Windows 11/NTFS and
-Ubuntu 26.04/ext4. See the [release notes](docs/releases/v0.1.0.md) for the tested
+contract is available above. Release v0.1.0 has been tested on Windows 11 x64 with
+NTFS, and Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 on AMD64 and ARM64 with ext4.
+Alpine testing covers native-architecture container userspace on an Ubuntu 26.04
+host kernel with bind-mounted ext4. See the [release notes](docs/releases/v0.1.0.md) for the tested
 environments, checksums, operating instructions and limits.
+localpost is free and open-source software under the MIT license, provided as is
+without warranty. These good-faith tests carry no support commitment.
+[GitHub issues](https://github.com/SixbucksSolutions/localpost/issues) are welcome,
+with no guarantee of a response or fix.
 The M03 API uses one listener and UUIDv4-addressed registrations; the old
 per-registration ports are removed.
 
@@ -150,8 +157,7 @@ The operator can start localpost with:
 
 Stop it with Ctrl+C. Shutdown stops new work, allows a shared grace period of up
 to 30 seconds, then interrupts unfinished requests. The startup message confirms
-the bound address. Control and message routes use this same listener. Full
-release packaging belongs to a later milestone.
+the bound address. Control and message routes use this same listener.
 
 There is no configuration file. The shared listener uses an unprivileged TCP
 port on `127.0.0.1`. An occupied port causes startup to fail clearly; localpost
@@ -159,9 +165,10 @@ does not silently choose another port.
 
 ### Build release candidates
 
-The accepted [first-release scope](docs/adr/0008-first-release-scope.md) targets
-Windows 11 x64 and Ubuntu 26.04 x64. These support targets require qualification
-of the actual archives; cross-compilation alone is not release evidence.
+The original [first-release scope](docs/adr/0008-first-release-scope.md) targeted
+Windows 11 x64 and Ubuntu 26.04 x64. Additional Linux environments and ARM64 were
+tested using the exact archives. The current test matrix
+is in the [release notes](docs/releases/v0.1.0.md).
 
 From a clean checkout, build the versioned candidates into a new or empty directory:
 
@@ -170,11 +177,14 @@ $candidateDir = Join-Path $env:TEMP ('localpost-candidate-' + [guid]::NewGuid())
 go run ./tools/release --version 0.1.0 --output $candidateDir
 ```
 
-Published releases are immutable. A fresh local build is not a replacement for
-the published v0.1.0 assets; changes require a new release version and qualification.
+Preserve published artifact bytes. A fresh local build does not replace a
+published v0.1.0 asset. The Linux ARM64 archive was added on 2026-11-05 from the
+exact qualified package built from the original release source, without rebuilding.
 
 The builder exports the identified Git commit, uses the pinned Go toolchain,
-and produces the two archives plus `SHA256SUMS`. Each archive includes its
+and by default produces the two AMD64 archives plus `SHA256SUMS`. Use
+`--source-ref` and `--targets` to select a source revision and build targets.
+Each archive includes its
 binary, offline instructions, licenses, canonical API contract and build
 manifest. `localpost --version` reports binary identity without opening a port;
 ordinary development builds report `dev` and `unknown`.
@@ -203,23 +213,23 @@ checks run in native-architecture containers on Ubuntu 26.04, sharing the host
 kernel and a bind-mounted filesystem. Evidence records the actual OS, kernel,
 filesystem and image digest. This scope covers Alpine userspace compatibility.
 
-The AMD64 wave downloads and verifies the published v0.1.0 archive. The ARM64
-wave builds an unpublished test package twice from the original v0.1.0 source,
-using the release builder's `--source-ref v0.1.0 --targets linux/arm64` options.
-The defaults remain the current commit and both AMD64 targets. ARM64 uses
-`CGO_ENABLED=0` and `GOARM64=v8.0`.
+Both waves download and verify their published v0.1.0 archives. The original
+ARM64 qualification built a reproducible test package twice from the original
+v0.1.0 source using `--source-ref v0.1.0 --targets linux/arm64`,
+`CGO_ENABLED=0` and `GOARM64=v8.0`. That exact package is now published.
 
 Both waves check package identity, ordinary-user startup with an empty `PATH`,
 default and overridden ports, occupied-port rejection, API/CORS behavior,
 byte-exact publication, disconnect cleanup, storage failures and graceful shutdown.
-CI retains reports, checksums and the ARM64 test package for 90 days. Successful
-runs provide review evidence; publishing additional release assets is a separate step.
+CI retains reports and checksums for 90 days. Successful runs provide review
+evidence of testing in the recorded environments.
 
 The [2026-11-05 AMD64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42028967680)
 passed for Ubuntu 24.04 and Alpine 3.24.3 using the published archive.
 The [2026-11-05 ARM64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42029293520)
-passed for Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 using the reproducible,
-unpublished test package from the original v0.1.0 source.
+passed for Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 using the reproducible
+package from the original v0.1.0 source. Terry accepted these qualifications
+before the test matrix and Linux ARM64 release asset were added.
 
 ## Registration API
 

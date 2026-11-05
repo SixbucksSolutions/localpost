@@ -471,7 +471,7 @@ func archiveBytes(base string, entries []entry, windows bool) ([]byte, error) {
 
 const runtimeReadme = `# localpost
 
-A shared localhost HTTP-to-file delivery service. Support status is defined by
+A shared localhost HTTP-to-file delivery service. Test coverage is recorded in
 the matching GitHub release. Actions artifacts are candidates until accepted and
 published. See build-info.json for identity
 and openapi.json for the complete API contract. No Go or Node installation is
@@ -512,7 +512,8 @@ executable. Start it on the intended port and verify readiness before clients
 register again. Rollback means stopping the new process, starting the retained
 version and creating fresh registrations. Neither action removes delivered files.
 
-Verify archive SHA-256 against SHA256SUMS before use. Supported environments are
-limited to the accompanying release's qualification results; a cross-compiled
-candidate alone is not qualification. Bundled Go notices are under licenses/go.
+Verify archive SHA-256 against SHA256SUMS before use. The accompanying release
+records good-faith testing. This MIT-licensed software is provided as is without
+warranty or a support commitment. GitHub issues are welcome with no guarantee
+of a response or fix. Bundled Go notices are under licenses/go.
 `
