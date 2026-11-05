@@ -55,6 +55,12 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation failed. Run npm ci if dependencies are missing.' }
     & node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs scripts/qualify-packaged-service.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation tests failed.' }
+    foreach ($script in @('container-package.mjs', 'qualify-container.mjs', 'publish-containers.mjs')) {
+        & node --check (Join-Path $PSScriptRoot $script)
+        if ($LASTEXITCODE -ne 0) { throw "Container tooling syntax check failed: $script" }
+    }
+    & node --test scripts/publish-containers.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Container publication tests failed.' }
     if ($ServiceUrl) {
         & node scripts/check-openapi-service.mjs $ServiceUrl
         if ($LASTEXITCODE -ne 0) { throw 'Live OpenAPI service checks failed.' }

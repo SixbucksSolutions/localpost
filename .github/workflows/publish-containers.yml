@@ -1,0 +1,219 @@
+name: Publish qualified containers
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-localpost-0.1.0
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/sixbuckssolutions/localpost
+
+jobs:
+  qualify:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-26.04
+            architecture: amd64
+          - runner: ubuntu-26.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      ARCHITECTURE: ${{ matrix.architecture }}
+      CONTAINER_IMAGE: localpost-qualified:${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - name: Verify published archive and native host
+        run: |
+          node scripts/container-package.mjs
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Package existing release bytes
+        run: |
+          source_epoch=$(git show -s --format=%ct 852b8a9ded0d03e98cada5810b18c92746848545)
+          docker buildx build --load --provenance=false --sbom=false \
+            --platform "linux/$ARCHITECTURE" \
+            --build-arg "SOURCE_DATE_EPOCH=$source_epoch" \
+            --build-arg "PACKAGING_REVISION=$GITHUB_SHA" \
+            --file Dockerfile --tag "$CONTAINER_IMAGE" \
+            "$RUNNER_TEMP/unpacked/localpost_0.1.0_linux_$ARCHITECTURE"
+      - name: Qualify exact native image
+        run: node scripts/qualify-container.mjs
+      - name: Save exact tested image
+        run: |
+          mkdir -p "$RUNNER_TEMP/qualified/$ARCHITECTURE"
+          docker save --output "$RUNNER_TEMP/qualified/$ARCHITECTURE/image.tar" "$CONTAINER_IMAGE"
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import {execFileSync} from 'node:child_process';
+          const [image]=JSON.parse(execFileSync('docker',['image','inspect',process.env.CONTAINER_IMAGE]));
+          fs.writeFileSync(`${process.env.RUNNER_TEMP}/qualified/${process.env.ARCHITECTURE}/identity.json`, JSON.stringify({architecture:process.env.ARCHITECTURE,imageId:image.Id},null,2));
+          JS
+      - name: Retain tested image
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: qualified-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/qualified/${{ matrix.architecture }}/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
+          overwrite: true
+      - name: Retain qualification evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-qualification-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/container-evidence/*
+          if-no-files-found: warn
+          retention-days: 90
+          overwrite: true
+
+  publish:
+    needs: qualify
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: qualified-amd64
+          path: ${{ runner.temp }}/qualified/amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: qualified-arm64
+          path: ${{ runner.temp }}/qualified/arm64
+      - name: Authenticate package publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Publish exact tested platforms and guarded version index
+        run: node scripts/publish-containers.mjs publish
+      - name: Expose version publication for public visibility setup
+        run: |
+          echo 'Version 0.1.0 is published. Ensure the localpost GHCR package is public while anonymous verification retries.' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/container-publication/publication.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: container-publication
+          path: ${{ runner.temp }}/container-publication/publication.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+      - name: Clear registry credentials
+        if: always()
+        run: docker logout ghcr.io
+
+  anonymous:
+    needs: publish
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-26.04
+            architecture: amd64
+          - runner: ubuntu-26.04-arm
+            architecture: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      ARCHITECTURE: ${{ matrix.architecture }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: container-publication
+          path: ${{ runner.temp }}/container-publication
+      - name: Prepare anonymous verification and accepted package
+        run: |
+          export DOCKER_CONFIG="$RUNNER_TEMP/anonymous-docker"
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          mkdir -m 700 "$DOCKER_CONFIG"
+          node scripts/container-package.mjs
+          npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify anonymous native pull with bounded visibility retry
+        timeout-minutes: 10
+        run: |
+          deadline=$((SECONDS + 600))
+          until node scripts/publish-containers.mjs verify; do
+            if (( SECONDS >= deadline )); then exit 1; fi
+            sleep 15
+          done
+      - name: Qualify anonymously pulled version image
+        run: node scripts/qualify-container.mjs
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: anonymous-${{ matrix.architecture }}
+          path: |
+            ${{ runner.temp }}/container-publication/anonymous-${{ matrix.architecture }}.json
+            ${{ runner.temp }}/container-evidence/qualification.json
+          if-no-files-found: error
+          retention-days: 90
+          overwrite: true
+      - name: Retain anonymous failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: anonymous-failure-${{ matrix.architecture }}
+          path: ${{ runner.temp }}/container-evidence/*
+          if-no-files-found: warn
+          retention-days: 90
+          overwrite: true
+
+  promote:
+    needs: [publish, anonymous]
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: container-publication
+          path: ${{ runner.temp }}/container-publication
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: anonymous-*
+          path: ${{ runner.temp }}/container-publication
+          merge-multiple: true
+      - name: Authenticate package publisher
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Promote verified version index to latest
+        run: node scripts/publish-containers.mjs promote
+      - name: Clear registry credentials
+        if: always()
+        run: docker logout ghcr.io
+
