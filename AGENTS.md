@@ -47,6 +47,19 @@ before starting another instance; investigate unexpected absence or exit and
 restore service. Do not ask Terry to start it as though this chat were an external
 client project.
 
+Terry clarified on 2026-11-05 that "start localpost" means launch the shared host
+service on its default `127.0.0.1:53147` endpoint, fully detached from Codex and
+the current agent. Use a host-owned background launch mechanism that survives
+Codex exiting, with a hidden window and private stdout/stderr logs. Verify both
+HTTP/file delivery and the independent process ownership before reporting it
+running. Reuse a healthy independently launched instance.
+
+On this Windows host, use the user-level scheduled task `localpost Shared
+Service`. It launches through system Windows PowerShell, has no execution time
+limit, and records ownership in the private `daemon-runtime.json`. Start that
+task with `Start-ScheduledTask` when its listener is absent. Keep its launcher,
+installed release executable and logs under the private runtime directory.
+
 Keep daemon ownership metadata and stdout/stderr logs under the private runtime
 directory listed below. The default listener is `127.0.0.1:53147`. Verify service
 with an HTTP request and, when needed, an isolated registration/delivery/teardown
