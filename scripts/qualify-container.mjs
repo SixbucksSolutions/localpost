@@ -123,8 +123,15 @@ try {
   assert.equal(delivery.status, 200);
   const receipt = JSON.parse(delivery.body);
   assert.match(receipt.filename, /^localpost_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.dat$/);
-  assert.deepEqual(await readFile(path.join(defaultDirectory, receipt.filename)), Buffer.from([0, 255, 10]));
-  assert.equal((await stat(path.join(defaultDirectory, receipt.filename))).uid, 65532);
+  const deliveredPath = path.join(defaultDirectory, receipt.filename);
+  const deliveredStat = await stat(deliveredPath);
+  assert.equal(deliveredStat.uid, 65532);
+  assert.equal(deliveredStat.mode & 0o777, 0o600);
+  // The default image user owns this private file. Copy through Docker for the
+  // differently-owned CI reader; normal host-user delivery is tested below.
+  const copiedDelivery = path.join(root, 'default-delivery.dat');
+  await docker('cp', `${defaultUser}:${deliveredPath}`, copiedDelivery);
+  assert.deepEqual(await readFile(copiedDelivery), Buffer.from([0, 255, 10]));
   assert.equal((await send(53152, `/registrations/${id}`, 'DELETE')).status, 200);
   await docker('stop', defaultUser);
   phase = 'full-contract';
