@@ -6,6 +6,7 @@ A localhost post office for agents.
 [Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_windows_amd64.zip) ·
 [Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_amd64.tar.gz) ·
 [Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_arm64.tar.gz) ·
+[Docker](docs/containers.md) ·
 [SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/SHA256SUMS)
 
 **API reference: [OpenAPI 3.2.1 contract](openapi.json).**
@@ -58,6 +59,12 @@ understand them.
 If localpost is unavailable, the agent tells the person running it. Agents do
 not start a replacement daemon or fall back to project-local collectors.
 
+## Container deployment
+
+The public image `ghcr.io/sixbuckssolutions/localpost:0.1.0` provides Linux AMD64
+and ARM64 deployments. It uses the tested release binaries in a minimal scratch
+image. See the [container guide](docs/containers.md) for host networking,
+persistent inbox mounts, permissions, digests and operating instructions.
 ## Build and run the foundation
 
 Development uses Go **1.27.3**, recorded in `.go-version`, and golangci-lint
