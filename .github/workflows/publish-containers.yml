@@ -2,6 +2,12 @@ name: Publish qualified containers
 
 on:
   workflow_dispatch:
+    inputs:
+      promote_run_id:
+        description: Resume promotion only from approved run 42034182097
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -15,6 +21,7 @@ env:
 
 jobs:
   qualify:
+    if: inputs.promote_run_id == ''
     strategy:
       fail-fast: false
       matrix:
@@ -82,6 +89,7 @@ jobs:
           overwrite: true
 
   publish:
+    if: inputs.promote_run_id == ''
     needs: qualify
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -125,6 +133,7 @@ jobs:
         run: docker logout ghcr.io
 
   anonymous:
+    if: inputs.promote_run_id == ''
     needs: publish
     strategy:
       fail-fast: false
@@ -187,10 +196,12 @@ jobs:
 
   promote:
     needs: [publish, anonymous]
+    if: always() && (inputs.promote_run_id != '' || (needs.publish.result == 'success' && needs.anonymous.result == 'success'))
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:
       contents: read
+      actions: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -199,15 +210,54 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: .node-version
+      - name: Select and validate promotion source
+        id: source
+        env:
+          PROMOTE_RUN_ID: ${{ inputs.promote_run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "$PROMOTE_RUN_ID" ]; then
+            node scripts/publish-containers.mjs resume-check
+            source_run="$PROMOTE_RUN_ID"
+          else
+            source_run="$GITHUB_RUN_ID"
+          fi
+          echo "run_id=$source_run" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.run_id }}
           name: container-publication
           path: ${{ runner.temp }}/container-publication
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: anonymous-*
-          path: ${{ runner.temp }}/container-publication
-          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          name: anonymous-amd64
+          path: ${{ runner.temp }}/promotion-artifacts/amd64
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.source.outputs.run_id }}
+          name: anonymous-arm64
+          path: ${{ runner.temp }}/promotion-artifacts/arm64
+      - name: Normalize and verify anonymous qualification receipts
+        run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          import {copyFile,readFile} from 'node:fs/promises';
+          import path from 'node:path';
+          for (const architecture of ['amd64','arm64']) {
+            const source=path.join(process.env.RUNNER_TEMP,'promotion-artifacts',architecture);
+            const receiptPath=path.join(source,'container-publication',`anonymous-${architecture}.json`);
+            const receipt=JSON.parse(await readFile(receiptPath));
+            const qualification=JSON.parse(await readFile(path.join(source,'container-evidence','qualification.json')));
+            assert.equal(qualification.passed,true);
+            assert.equal(qualification.architecture,architecture);
+            assert.equal(qualification.imageId,receipt.imageId);
+            await copyFile(receiptPath,path.join(process.env.RUNNER_TEMP,'container-publication',`anonymous-${architecture}.json`));
+          }
+          JS
       - name: Authenticate package publisher
         env:
           GH_TOKEN: ${{ github.token }}
@@ -217,4 +267,3 @@ jobs:
       - name: Clear registry credentials
         if: always()
         run: docker logout ghcr.io
-

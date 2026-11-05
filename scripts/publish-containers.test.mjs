@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkImageIdentity, checkIndex, isMissingManifest } from './publish-containers.mjs';
+import { checkImageIdentity, checkIndex, checkPromotionSource, isMissingManifest } from './publish-containers.mjs';
 
 const reference = 'ghcr.io/sixbuckssolutions/localpost:0.1.0';
 test('missing version permits only recognized manifest absence', () => {
@@ -52,4 +52,26 @@ test('image identity accepts only verified Docker store representations', () => 
   assert.throws(() => checkImageIdentity('not-a-digest', pulled));
   assert.throws(() => checkImageIdentity(platformDigest, { platformDigest }));
   assert.throws(() => checkImageIdentity(platformDigest, { ...platform, indexDigest: 'invalid' }));
+});
+
+test('promotion resume accepts only the approved fully verified source run', () => {
+  const repository = 'SixbucksSolutions/localpost';
+  const runId = '42034182097';
+  const run = { id: Number(runId), repository: { full_name: repository }, path: '.github/workflows/publish-containers.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'failure' };
+  const names = ['qualify (ubuntu-26.04, amd64)', 'qualify (ubuntu-26.04-arm, arm64)', 'publish', 'anonymous (ubuntu-26.04, amd64)', 'anonymous (ubuntu-26.04-arm, arm64)', 'promote'];
+  const jobs = { total_count: 6, jobs: names.map((name) => ({ name, status: 'completed', conclusion: name === 'promote' ? 'failure' : 'success' })) };
+  checkPromotionSource(run, jobs, repository, runId);
+  for (const field of ['path', 'event', 'status', 'conclusion']) {
+    assert.throws(() => checkPromotionSource({ ...run, [field]: 'wrong' }, jobs, repository, runId));
+  }
+  assert.throws(() => checkPromotionSource(run, jobs, 'another/repository', runId));
+  assert.throws(() => checkPromotionSource(run, jobs, repository, '42034182098'));
+  for (let index = 0; index < jobs.jobs.length; index++) {
+    const changed = structuredClone(jobs);
+    changed.jobs[index].conclusion = index === 5 ? 'success' : 'failure';
+    assert.throws(() => checkPromotionSource(run, changed, repository, runId));
+  }
+  const duplicate = structuredClone(jobs);
+  duplicate.jobs[1] = duplicate.jobs[0];
+  assert.throws(() => checkPromotionSource(run, duplicate, repository, runId));
 });

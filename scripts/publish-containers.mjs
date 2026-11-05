@@ -53,9 +53,48 @@ export const checkIndex = (index, platforms) => {
     assert.equal(descriptor.digest, platforms[architecture].digest);
   }
 };
+export function checkPromotionSource(run, jobs, repository, runId) {
+  assert.equal(runId, '42034182097', 'Only the explicitly approved failed-promotion run may be resumed');
+  assert.equal(String(run.id), runId);
+  assert.equal(run.repository.full_name.toLowerCase(), repository.toLowerCase());
+  assert.equal(run.path, '.github/workflows/publish-containers.yml');
+  assert.equal(run.event, 'workflow_dispatch');
+  assert.equal(run.status, 'completed');
+  assert.equal(run.conclusion, 'failure');
+  const expected = new Map([
+    ['qualify (ubuntu-26.04, amd64)', 'success'],
+    ['qualify (ubuntu-26.04-arm, arm64)', 'success'],
+    ['publish', 'success'],
+    ['anonymous (ubuntu-26.04, amd64)', 'success'],
+    ['anonymous (ubuntu-26.04-arm, arm64)', 'success'],
+    ['promote', 'failure'],
+  ]);
+  assert.equal(jobs.total_count, expected.size);
+  assert.equal(jobs.jobs.length, expected.size);
+  for (const job of jobs.jobs) {
+    assert.equal(job.status, 'completed');
+    assert.equal(job.conclusion, expected.get(job.name), 'Source run must have only its promotion job failed');
+    assert.ok(expected.delete(job.name), 'Unexpected or duplicate source job');
+  }
+  assert.equal(expected.size, 0);
+}
+
 export async function main(mode = process.argv[2]) {
   const root = path.join(process.env.RUNNER_TEMP, 'container-publication');
   await mkdir(root, { recursive: true });
+  if (mode === 'resume-check') {
+    const runId = process.env.PROMOTE_RUN_ID;
+    assert.equal(runId, '42034182097', 'Unapproved promotion source run');
+    const repository = process.env.GITHUB_REPOSITORY;
+    assert.equal(repository.toLowerCase(), 'sixbuckssolutions/localpost');
+    const endpoint = `repos/${repository}/actions/runs/${runId}`;
+    const query = async (route) => JSON.parse((await execute('gh', ['api', route], { timeout: 30000, maxBuffer: 1024 * 1024 })).stdout);
+    const run = await query(endpoint);
+    const jobs = await query(`${endpoint}/jobs?filter=latest&per_page=100`);
+    checkPromotionSource(run, jobs, repository, runId);
+    console.log(`Verified completed qualification, publication and anonymous jobs for promotion source ${runId}.`);
+    return;
+  }
   if (mode === 'publish') {
     const platforms = {};
     for (const architecture of ['amd64', 'arm64']) {
