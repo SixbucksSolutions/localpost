@@ -17,6 +17,7 @@ maintainer; it does not mean the behavior has been implemented or tested.
 | [0009](0009-service-created-mailboxes.md) | Service-created UUIDv4 mailboxes and the 0.2.0 migration | Accepted for authorized implementation | 2026-11-05 |
 | [0010](0010-date-versioned-api.md) | Explicit date-versioned API paths and retired-version errors | Accepted for authorized implementation | 2026-11-05 |
 | [0011](0011-startup-mailbox-cleanup.md) | Clear the dedicated mailbox root on startup | Accepted for authorized implementation | 2026-11-05 |
+| [0012](0012-in-memory-http-mailboxes.md) | Replace filesystem delivery with in-memory HTTP mailboxes | Proposed for Terry review | 2026-11-05 |
 
 ## Open implementation decisions
 
