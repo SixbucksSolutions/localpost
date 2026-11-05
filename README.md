@@ -215,6 +215,9 @@ byte-exact publication, disconnect cleanup, storage failures and graceful shutdo
 CI retains reports, checksums and the ARM64 test package for 90 days. Successful
 runs provide review evidence; publishing additional release assets is a separate step.
 
+The [2026-11-05 AMD64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42028967680)
+passed for Ubuntu 24.04 and Alpine 3.24.3 using the published archive.
+
 ## Registration API
 
 The control API uses JSON for requests, success responses, and application errors.
