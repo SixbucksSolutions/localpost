@@ -29,7 +29,10 @@ bodies even when HTTP status is 200.
 Only Webdis publishes a host port, bound to IPv4 loopback. The unauthenticated
 command API allows only `PING`, `XADD`, `XRANGE`, `XTRIM` and `DEL` through a
 Webdis allowlist and retains Webdis's browser CORS behavior. The backend
-network is internal. The profile runs both processes under numeric UID/GID 65532
+network is internal, with Valkey attached only to that network. Webdis also
+uses a frontend bridge so Docker can publish its loopback port. That bridge
+provides Webdis outbound routing. Docker requires a default-gateway network
+for port publishing. The profile runs both processes under numeric UID/GID 65532
 with read-only roots, including Valkey's `/data`.
 There are no writable application mounts or anonymous data volumes. RDB, AOF,
 daemonization and PID output are disabled. Webdis writes console diagnostics to
@@ -74,3 +77,6 @@ Set `LOCALPOST_EVIDENCE_DIR` to retain a JSON result and container console logs
 from this isolated fixture. The workflow uploads these on success or failure.
 Qualification checks Valkey's executable version and Webdis's startup banner
 against the pinned versions, in addition to image labels and effective mounts.
+
+The Docker networking behavior is documented in the
+[Moby maintainer explanation](https://github.com/moby/moby/discussions/53256).

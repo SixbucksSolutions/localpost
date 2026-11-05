@@ -51,13 +51,14 @@ services:
           create_host_path: false
     ports:
       - "127.0.0.1:${LOCALPOST_PORT:-53147}:7379"
-    networks: [backend]
+    networks: [frontend, backend]
     depends_on:
       valkey:
         condition: service_healthy
     stop_grace_period: 10s
 
 networks:
+  frontend: {}
   backend:
     internal: true
 

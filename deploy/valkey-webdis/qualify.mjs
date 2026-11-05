@@ -20,14 +20,32 @@ async function command(path, method = 'GET', body) {
   return response.json();
 }
 async function ready() {
+  let lastResponse;
   for (let attempt = 0; attempt < 60; attempt++) {
     try {
-      const reply = (await command('PING')).PING;
-      if (Array.isArray(reply) && reply[0] === true && reply[1] === 'PONG') return;
-    } catch { /* Startup can precede the frontend listener. */ }
+      const response = await fetch(`${base}/PING`, {signal: AbortSignal.timeout(5000)});
+      const text = (await response.text()).slice(0, 512);
+      lastResponse = {status: response.status, body: text};
+      const reply = JSON.parse(text).PING;
+      if (response.status === 200 && Array.isArray(reply) && reply[0] === true && reply[1] === 'PONG') return;
+    } catch (error) {
+      lastResponse = {error: error.name, code: error.cause?.code};
+    }
     await new Promise(resolve => setTimeout(resolve, 500));
   }
-  throw new Error('Webdis did not become ready');
+  function probe(...args) {
+    try {
+      return compose('exec', '-T', ...args).slice(0, 512);
+    } catch (error) {
+      return {exitCode: error.status, stdout: error.stdout?.toString().slice(0, 512),
+        stderr: error.stderr?.toString().slice(0, 512)};
+    }
+  }
+  evidence.readiness = {hostHTTP: lastResponse,
+    internalHTTP: probe('valkey', 'sh', '-c', 'wget -T 5 -qO- http://webdis:7379/PING'),
+    backend: probe('valkey', 'valkey-cli', 'PING')};
+  console.error(JSON.stringify(evidence.readiness));
+  throw new Error('Webdis did not become ready; bounded PING diagnostics recorded');
 }
 const evidence = {status: 'failed', project, architecture: process.arch, pins: pins.images};
 function stopCleanly(service, id) {
@@ -62,6 +80,14 @@ try {
   }
   const valkey = containers.find(container => container.Config.Labels['com.docker.compose.service'] === 'valkey');
   const webdis = containers.find(container => container.Config.Labels['com.docker.compose.service'] === 'webdis');
+  const backendName = `${project}_backend`;
+  const frontendName = `${project}_frontend`;
+  assert.deepEqual(Object.keys(valkey.NetworkSettings.Networks), [backendName]);
+  assert.deepEqual(Object.keys(webdis.NetworkSettings.Networks).sort(), [backendName, frontendName].sort());
+  const networks = JSON.parse(execFileSync('docker', ['network', 'inspect', backendName, frontendName], {encoding: 'utf8'}));
+  assert.equal(networks.find(network => network.Name === backendName).Internal, true);
+  assert.equal(networks.find(network => network.Name === frontendName).Internal, false);
+  assert.deepEqual(Object.keys(webdis.NetworkSettings.Ports), ['7379/tcp']);
   assert.deepEqual(valkey.Config.Entrypoint, ['valkey-server']);
   assert.deepEqual(webdis.Config.Entrypoint, ['/usr/local/bin/webdis']);
   assert.equal(Object.values(valkey.NetworkSettings.Ports || {}).some(Boolean), false);
