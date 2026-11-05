@@ -2,7 +2,7 @@
 
 The v0.2.0 container workflow below is in development and pending release and
 qualification. The published v0.1.0 image and its tested digest remain available.
-See the [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/docs/containers.md)
+See the [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/6889c8c/docs/containers.md)
 for that release's unversioned API and recorded test matrix.
 
 ## Linux host
