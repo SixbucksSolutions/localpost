@@ -53,7 +53,7 @@ jobs:
           import assert from 'node:assert/strict';
           import {createHash} from 'node:crypto';
           const c=JSON.parse(fs.readFileSync('release/0.1.0-candidate.json'));
-          for(const a of c.assets) assert.equal(createHash('sha256').update(fs.readFileSync(path.join(process.env.CANDIDATE_DIR,a.name))).digest('hex'),a.sha256);
+          for(const a of [...c.assets,c.checksumFile]) assert.equal(createHash('sha256').update(fs.readFileSync(path.join(process.env.CANDIDATE_DIR,a.name))).digest('hex'),a.sha256);
           JS
           mkdir "$RUNNER_TEMP/unpacked"
           tar -xzf "$CANDIDATE_DIR/localpost_0.1.0_linux_amd64.tar.gz" -C "$RUNNER_TEMP/unpacked"

@@ -14,7 +14,8 @@ message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. The browser pilot
 has completed a headless Chrome feedback-loop proof on Windows. Its OpenAPI
 contract is available above. Versioned candidate packaging is being prepared in
-M06; supported release qualification and publication remain pending.
+M06. The preserved candidate has been qualified on Windows 11/NTFS and
+Ubuntu 26.04/ext4; public release remains pending.
 The M03 API uses one listener and UUIDv4-addressed registrations; the old
 per-registration ports are removed.
 
