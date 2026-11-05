@@ -79,6 +79,8 @@ Its trigger registration and manual execution are verified. Observe the next
 actual sign-in before claiming that trigger has been exercised.
 
 Use `C:\Projects\shared-message-queue\queue.ps1 -Action Status` to check health.
+Status checks HTTP readiness from the caller. Host startup also validates its
+scheduled task and Linux unit.
 An absent listener or failed queue protocol on port 53147 requires immediate
 Terry attention outside an announced maintenance window. Do not start duplicate
 collectors. Start and Stop are shared-host operations requiring an explicit
