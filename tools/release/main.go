@@ -275,6 +275,13 @@ func release(version, output, sourceRef, targetList string, run commandRunner) (
 			return noticeErr
 		}
 		entries = append(entries, notices...)
+		if goos == "windows" {
+			serviceEntries, serviceErr := windowsServiceEntries(snapshot)
+			if serviceErr != nil {
+				return serviceErr
+			}
+			entries = append(entries, serviceEntries...)
+		}
 		base := "localpost_" + version + "_" + goos + "_" + goarch
 		archive, archiveErr := archiveBytes(base, entries, goos == "windows")
 		if archiveErr != nil {
@@ -308,6 +315,19 @@ func release(version, output, sourceRef, targetList string, run commandRunner) (
 		}
 	}
 	return writeExclusive(filepath.Join(output, "SHA256SUMS"), []byte(strings.Join(sums, "")))
+}
+
+func windowsServiceEntries(source string) ([]entry, error) {
+	files := []string{"scripts/install-service.ps1", "docs/windows-service.md"}
+	entries := make([]entry, 0, len(files))
+	for _, name := range files {
+		data, err := os.ReadFile(filepath.Join(source, filepath.FromSlash(name)))
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry{name, data, 0644})
+	}
+	return entries, nil
 }
 
 func emptyOutput(dir string) error {
@@ -484,6 +504,8 @@ Unpack the whole archive into a new directory. Run as an ordinary user:
 Create an absolute mailbox root writable by the daemon user first. Then run:
 
 Windows (PowerShell): .\localpost.exe --mailbox-root C:\localpost-mailboxes
+Windows automatic service: see docs/windows-service.md and run the packaged
+scripts/install-service.ps1 from an elevated PowerShell session.
 Linux: ./localpost --mailbox-root /absolute/path/to/localpost-mailboxes
 
 The default address is http://127.0.0.1:53147. Use --port 53148 to select another

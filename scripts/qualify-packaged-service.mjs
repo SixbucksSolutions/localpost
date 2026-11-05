@@ -78,7 +78,8 @@ async function waitFor(predicate) {
 }
 
 // Keep the body deliberately incomplete until the caller inspects the active temp file.
-export async function partialUpload({ url, prefix, tail, observe, disconnect = false }) {
+export async function partialUpload({ url, prefix, tail, observe, disconnect = false, requestTimeoutMs = timeoutMs }) {
+  assert.ok(Number.isInteger(requestTimeoutMs) && requestTimeoutMs > 0 && requestTimeoutMs < 30000, 'Invalid partial upload timeout');
   const target = new URL(url);
   validateBaseUrl(target.origin);
   let timer;
@@ -96,7 +97,7 @@ export async function partialUpload({ url, prefix, tail, observe, disconnect = f
       res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks) }));
     });
     req.on('error', reject);
-    timer = setTimeout(() => req.destroy(new Error('Partial upload timed out')), timeoutMs);
+    timer = setTimeout(() => req.destroy(new Error('Partial upload timed out')), requestTimeoutMs);
     req.write(prefix);
   });
   // Attach rejection handling immediately while filesystem observations run.

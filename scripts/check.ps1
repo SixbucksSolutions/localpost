@@ -63,6 +63,14 @@ try {
     }
     & node --test scripts/publish-containers.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Container publication tests failed.' }
+    & node --check scripts/test-windows-service-upload.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Windows service upload probe syntax check failed.' }
+    foreach ($script in @('install-service.ps1', 'test-windows-service.ps1')) {
+        $parseTokens = $null
+        $parseErrors = $null
+        [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $script), [ref]$parseTokens, [ref]$parseErrors) | Out-Null
+        if ($parseErrors.Count -gt 0) { throw "Windows service script syntax check failed: $script" }
+    }
     if ($ServiceUrl) {
         if (-not $MailboxRoot) { throw 'Live service checks require -MailboxRoot for the expected server root.' }
         & node scripts/check-openapi-service.mjs $ServiceUrl $MailboxRoot

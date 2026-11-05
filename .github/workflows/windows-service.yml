@@ -1,0 +1,54 @@
+﻿name: Windows service
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/install-service.ps1'
+      - 'scripts/test-windows-service.ps1'
+      - 'scripts/test-windows-service-upload.mjs'
+      - '.github/workflows/windows-service.yml'
+      - 'docs/windows-service.md'
+      - 'tools/release/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - '.go-version'
+  pull_request:
+    paths:
+      - 'scripts/install-service.ps1'
+      - 'scripts/test-windows-service.ps1'
+      - 'scripts/test-windows-service-upload.mjs'
+      - '.github/workflows/windows-service.yml'
+      - 'docs/windows-service.md'
+      - 'tools/release/**'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - '.go-version'
+permissions:
+  contents: read
+jobs:
+  service:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build identified development fixture
+        shell: pwsh
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP 'localpost-service-package'
+          New-Item -ItemType Directory -Path "$package/docs" -Force | Out-Null
+          $env:CGO_ENABLED = '0'
+          go build -trimpath -buildvcs=false -ldflags "-X main.releaseVersion=0.2.0 -X main.sourceCommit=$env:GITHUB_SHA" -o "$package/localpost.exe" ./cmd/localpost
+          if ($LASTEXITCODE -ne 0) { throw 'Fixture build failed.' }
+          @{version='0.2.0'; target='windows/amd64'; sourceCommit=$env:GITHUB_SHA; binarySHA256=(Get-FileHash "$package/localpost.exe").Hash.ToLowerInvariant()} | ConvertTo-Json | Set-Content "$package/build-info.json"
+          Copy-Item docs/windows-service.md "$package/docs/windows-service.md"
+          ./scripts/test-windows-service.ps1 -PackageDirectory $package

@@ -332,3 +332,28 @@ func TestRuntimeReadmeUsesMailboxRootAndCurrentAPI(t *testing.T) {
 		t.Fatal("runtime README retained caller-selected registration directory")
 	}
 }
+
+func TestWindowsServiceEntries(t *testing.T) {
+	source := t.TempDir()
+	for _, name := range []string{"scripts/install-service.ps1", "docs/windows-service.md"} {
+		filename := filepath.Join(source, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(filename), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte(name), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := windowsServiceEntries(source)
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("Windows service entries: %v, %v", entries, err)
+	}
+	for _, item := range entries {
+		if string(item.data) != item.name || item.mode != 0644 {
+			t.Fatalf("unexpected Windows service entry: %v", item)
+		}
+	}
+	if _, err = windowsServiceEntries(t.TempDir()); err == nil {
+		t.Fatal("accepted missing installer files")
+	}
+}
