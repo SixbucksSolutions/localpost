@@ -1,0 +1,32 @@
+{
+  "redis_host": "valkey",
+  "redis_port": 6379,
+  "redis_auth": null,
+  "http_host": "0.0.0.0",
+  "http_port": 7379,
+  "http_max_request_size": 16777216,
+  "threads": 2,
+  "pool_size": 2,
+  "daemonize": false,
+  "websockets": false,
+  "database": 0,
+  "acl": [
+    {
+      "disabled": [
+        "*"
+      ]
+    },
+    {
+      "enabled": [
+        "PING",
+        "XADD",
+        "XRANGE",
+        "XTRIM",
+        "DEL"
+      ]
+    }
+  ],
+  "verbosity": 3,
+  "logfile": "/dev/stderr",
+  "log_fsync": null
+}

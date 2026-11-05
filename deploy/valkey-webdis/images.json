@@ -1,0 +1,42 @@
+{
+  "images": [
+    {
+      "image": "valkey/valkey:9.0.7-alpine",
+      "indexDigest": "sha256:2d04268dfa26ab31cfa3fdc538866e76438b2d00e41db41b8cb86d780ac5a416",
+      "platforms": [
+        {
+          "os": "linux",
+          "architecture": "amd64",
+          "digest": "sha256:ba88e813493c4c449b0127b571240323ce862c12c98a78ec25da53859bc0a5b1"
+        },
+        {
+          "os": "linux",
+          "architecture": "arm64",
+          "digest": "sha256:a4dc1d68c0257d0e8feecc4322321525931ac33dc2ab0dd68686665b3b55725d"
+        }
+      ]
+    },
+    {
+      "image": "nicolas/webdis:0.1.25",
+      "indexDigest": "sha256:59549310212dd905019e249642c46de4928d6787e18fad336feaed6f4fbcf8c2",
+      "platforms": [
+        {
+          "os": "linux",
+          "architecture": "amd64",
+          "digest": "sha256:c7d7c0c22e99e49f38be9113f6b88e5939d42326cd6659e7c83572d19382d490"
+        },
+        {
+          "os": "linux",
+          "architecture": "arm64",
+          "digest": "sha256:4fe7aa522c153e3f00ed38b462aae7a221f94cd81a0d95654b55a43da53a91d5"
+        }
+      ]
+    }
+  ],
+  "resolvedDate": "2026-11-05",
+  "source": "https://registry-1.docker.io/v2/",
+  "qualificationTargets": [
+    "linux/amd64",
+    "linux/arm64"
+  ]
+}

@@ -1,0 +1,63 @@
+name: localpost-memory
+services:
+  valkey:
+    image: valkey/valkey:9.0.7-alpine@sha256:2d04268dfa26ab31cfa3fdc538866e76438b2d00e41db41b8cb86d780ac5a416
+    user: "65532:65532"
+    read_only: true
+    # Bypass the upstream entrypoint's ownership-changing startup path.
+    entrypoint: ["valkey-server"]
+    command:
+      - --bind
+      - 0.0.0.0
+      - --protected-mode
+      - "no"
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --daemonize
+      - "no"
+      - --pidfile
+      - ""
+      - --logfile
+      - ""
+      - --dir
+      - /data
+      - --maxmemory
+      - ${LOCALPOST_MAXMEMORY:-128mb}
+      - --maxmemory-policy
+      - noeviction
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    stop_grace_period: 10s
+
+  webdis:
+    image: nicolas/webdis:0.1.25@sha256:59549310212dd905019e249642c46de4928d6787e18fad336feaed6f4fbcf8c2
+    user: "65532:65532"
+    read_only: true
+    # Stock CMD also starts Redis. Run only Webdis against the separate backend.
+    entrypoint: ["/usr/local/bin/webdis"]
+    command: ["/etc/localpost-webdis.json"]
+    volumes:
+      - type: bind
+        source: ./webdis.json
+        target: /etc/localpost-webdis.json
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - "127.0.0.1:${LOCALPOST_PORT:-53147}:7379"
+    networks: [backend]
+    depends_on:
+      valkey:
+        condition: service_healthy
+    stop_grace_period: 10s
+
+networks:
+  backend:
+    internal: true
+

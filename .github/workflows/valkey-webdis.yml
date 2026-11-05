@@ -1,0 +1,36 @@
+name: Valkey Webdis runtime qualification
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'deploy/valkey-webdis/**'
+      - '.github/workflows/valkey-webdis.yml'
+permissions:
+  contents: read
+jobs:
+  runtime:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-26.04, ubuntu-26.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
+      - name: Qualify isolated pinned runtime
+        env:
+          LOCALPOST_EVIDENCE_DIR: ${{ runner.temp }}/valkey-webdis-evidence
+        run: node deploy/valkey-webdis/qualify.mjs
+      - name: Retain runtime evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: valkey-webdis-runtime-${{ matrix.runner }}
+          path: ${{ runner.temp }}/valkey-webdis-evidence/*
+          if-no-files-found: warn
+          retention-days: 30
