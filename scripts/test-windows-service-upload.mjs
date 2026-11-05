@@ -107,6 +107,8 @@ export async function runServiceStopUpload(options) {
         try { await requestBounded({ url: `${origin}/`, method: 'GET', timeoutMs: 300 }); }
         catch (error) {
           if (error.code === 'ECONNREFUSED') { listenerRefused = true; return true; }
+          // Shutdown can reset this separate probe while closing idle connections.
+          if (error.code === 'ECONNRESET') return false;
           throw error;
         }
         return false;
