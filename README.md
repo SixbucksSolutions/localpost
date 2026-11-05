@@ -2,36 +2,30 @@
 
 A localhost post office for agents.
 
-**Latest release: [v0.1.0](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.1.0)** —
-[Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_windows_amd64.zip) ·
-[Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_amd64.tar.gz) ·
-[Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_arm64.tar.gz) ·
-[v0.1.0 Docker guide](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/docs/containers.md) ·
-[SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/SHA256SUMS)
+**Latest release: [v0.2.0](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.2.0)** —
+[Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/localpost_0.2.0_windows_amd64.zip) ·
+[Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/localpost_0.2.0_linux_amd64.tar.gz) ·
+[Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/localpost_0.2.0_linux_arm64.tar.gz) ·
+[Container guide](docs/containers.md) ·
+[SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/SHA256SUMS)
 
-**Development API:** [v0.2.0 OpenAPI contract](openapi.json), pending release.
-The published v0.1.0 release uses its [immutable API contract](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/openapi.json).
+The [v0.2.0 OpenAPI contract](https://github.com/SixbucksSolutions/localpost/blob/8783e38a27c6c07536c4c9e9c1d403b1cd39eb59/openapi.json) describes the released API.
+The v0.1.0 release uses its [immutable API contract](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/openapi.json).
 
 localpost is one shared service that receives HTTP POST bodies and delivers them
 unchanged as files in a service-created directory. An agent registers a mailbox,
 gets a UUIDv4 identity on the shared listener, and reads the resulting files with
 its normal filesystem tools.
 
-**Status:** the Go executable, shared loopback listener, mailbox registration,
-message delivery, unregistration, and permissive CORS are implemented. Bounded
-robustness checks and race-test automation accompany the core. The browser pilot
-has completed a headless Chrome feedback-loop proof on Windows. Its OpenAPI
-contract is available above. Release v0.1.0 has been tested on Windows 11 x64 with
-NTFS, and Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 on AMD64 and ARM64 with ext4.
-Alpine testing covers native-architecture container userspace on an Ubuntu 26.04
-host kernel with bind-mounted ext4. See the [release notes](docs/releases/v0.1.0.md) for the tested
-environments, checksums, operating instructions and limits.
+**Status:** v0.2.0 provides the shared loopback listener, service-created
+mailboxes, message delivery, unregistration and permissive CORS. Its qualified
+archives cover Windows and Linux on the environments listed in the
+[release notes](docs/releases/v0.2.0.md). The dated API is incompatible with
+v0.1.0. The headless Chrome pilot exercised a browser feedback loop on Windows.
 localpost is free and open-source software under the MIT license, provided as is
 without warranty. These good-faith tests carry no support commitment.
 [GitHub issues](https://github.com/SixbucksSolutions/localpost/issues) are welcome,
 with no guarantee of a response or fix.
-The development v0.2.0 API uses dated routes and service-created mailboxes.
-It is pending release and is incompatible with the published v0.1.0 API.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -60,11 +54,12 @@ not start a replacement daemon or fall back to project-local collectors.
 
 ## Container deployment
 
-The published v0.1.0 image `ghcr.io/sixbuckssolutions/localpost:0.1.0` provides Linux AMD64
-and ARM64 deployments. It uses the tested release binaries in a minimal scratch
-image. See the [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/6889c8c/docs/containers.md)
-for its host networking, mounts, permissions, digest and operating instructions.
-The [development container guide](docs/containers.md) describes v0.2.0.
+The published v0.2.0 image `ghcr.io/sixbuckssolutions/localpost:0.2.0`
+provides Linux AMD64 and ARM64 deployments. See the [container guide](docs/containers.md)
+for its operating instructions and qualification status. The
+[v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/6889c8c/docs/containers.md)
+remains available for the earlier release.
+
 ## Build and run the foundation
 
 Development uses Go **1.27.3**, recorded in `.go-version`, and golangci-lint
@@ -178,7 +173,7 @@ does not silently choose another port.
 The original [first-release scope](docs/adr/0008-first-release-scope.md) targeted
 Windows 11 x64 and Ubuntu 26.04 x64. Additional Linux environments and ARM64 were
 tested using the exact archives. The current test matrix
-is in the [release notes](docs/releases/v0.1.0.md).
+is in the [release notes](docs/releases/v0.2.0.md).
 
 From a clean checkout, build the versioned candidates into a new or empty directory:
 
@@ -188,8 +183,7 @@ go run ./tools/release --version 0.2.0 --output $candidateDir
 ```
 
 Preserve published artifact bytes. A fresh local build does not replace a
-published v0.1.0 asset. The Linux ARM64 archive was added on 2026-11-05 from the
-exact qualified package built from the original release source, without rebuilding.
+published asset. The v0.2.0 release contains the exact qualified archives.
 
 The builder exports the identified Git commit, uses the pinned Go toolchain,
 and by default produces the two AMD64 archives plus `SHA256SUMS`. Use
@@ -233,16 +227,14 @@ byte-exact publication, disconnect cleanup, storage failures and graceful shutdo
 CI retains reports and checksums for 90 days. Successful runs provide review
 evidence of testing in the recorded environments.
 
-The [2026-11-05 AMD64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42028967680)
-passed for Ubuntu 24.04 and Alpine 3.24.3 using the published archive.
-The [2026-11-05 ARM64 certification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42029293520)
-passed for Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 using the reproducible
-package from the original v0.1.0 source. Terry accepted these qualifications
-before the test matrix and Linux ARM64 release asset were added.
+The v0.2.0 [AMD64](https://github.com/SixbucksSolutions/localpost/actions/runs/42065878731)
+and [ARM64](https://github.com/SixbucksSolutions/localpost/actions/runs/42065882862)
+certification runs passed. The [release notes](docs/releases/v0.2.0.md) describe
+the tested environments and qualification evidence.
 
 ## Registration API
 
-The development control API uses JSON for requests, success responses, and
+The control API uses JSON for requests, success responses, and
 application errors. Register with an empty object on the dated route.
 
 ```powershell
@@ -440,8 +432,8 @@ creates each destination directory and never deletes deliveries or mailbox direc
 
 ## Migrating from v0.1.0
 
-The v0.2.0 contract is pending release. The published v0.1.0 binaries continue
-to use their original unversioned routes and caller-created directories.
+The v0.1.0 binaries use unversioned routes and caller-created directories.
+The v0.2.0 release uses dated routes and service-created directories.
 
 - Provision an existing absolute root and pass `--mailbox-root` at startup.
 - Send `{}` when registering. Do not send `directory` or a process ID.
@@ -454,7 +446,7 @@ to use their original unversioned routes and caller-created directories.
   Account for orphaned directories after lost responses and manage retention.
 
 The planned rollout includes migration notices to FGA Dev M08, localswim V2 Dev
-M07 and Drive Stats Dev. Release and deployment remain subject to qualification.
+M07 and Drive Stats Dev.
 
 ## Project documents
 

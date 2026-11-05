@@ -12,8 +12,9 @@ Use the standard library first; do not reopen the language choice without a new
 explicit decision. Go 1.27.3 is the development toolchain, recorded in `.go-version`
 and selected explicitly by `scripts/check.ps1`. Run that script before handing off
 code changes. The first-release scope is accepted in
-`docs/adr/0008-first-release-scope.md`. The published v0.1.0 release has
-recorded qualification. The v0.2.0 candidate requires its own qualification. The language ADR does not authorize implementation work.
+`docs/adr/0008-first-release-scope.md`. Both published v0.1.0 and v0.2.0 releases
+have recorded qualification. The language ADR does not authorize implementation
+work.
 
 The mandatory check includes pinned golangci-lint from `.golangci-version` and
 the curated rules in `.golangci.yml`, plus formatting, tests, vet, and build.
@@ -37,8 +38,8 @@ a release or replace the shared daemon.
 
 For v0.2.0, the daemon requires an existing absolute `--mailbox-root`. Register
 with `{}` at `/api/2026-11-05/registrations` and use the returned `id` and
-`directory`. Retire registrations and clean up only owned mailboxes. Existing
-v0.1.0 shared daemon ownership remains as described below until deployment changes.
+`directory`. Retire registrations and clean up only owned mailboxes.
+The shared host now runs the published v0.2.0 executable.
 
 Keep control APIs REST-oriented and JSON-based, including structured application
 errors with stable codes. Message-upload bodies remain opaque bytes; do not wrap
@@ -64,6 +65,12 @@ Service`. It launches through system Windows PowerShell, has no execution time
 limit, and records ownership in the private `daemon-runtime.json`. Start that
 task with `Start-ScheduledTask` when its listener is absent. Keep its launcher,
 installed release executable and logs under the private runtime directory.
+
+The current task runs v0.2.0 with mailbox root
+`C:\Projects\localswim-state-store\localpost\.runtime\mailboxes`.
+Native Windows Service Control Manager installation is available through the
+packaged `scripts/install-service.ps1` but needs administrator elevation.
+Until that migration is performed, preserve the independent scheduled task.
 
 Keep daemon ownership metadata and stdout/stderr logs under the private runtime
 directory listed below. The default listener is `127.0.0.1:53147`. Verify service

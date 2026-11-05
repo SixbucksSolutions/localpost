@@ -51,5 +51,17 @@
       "arm64": "sha256:fb8dfdb539e52392ef32665ce960e4ae9f018478701747217aeae7da93e07601"
     },
     "runId": 42065893180
+  },
+  "containerPublication": {
+    "runId": 42068027114,
+    "indexDigest": "sha256:dec50d22196a2d4f87d004752f1a25df17dbf896b83f8abcf3586a887116c77f",
+    "tags": [
+      "0.2.0",
+      "latest"
+    ],
+    "anonymousNativeArchitectures": [
+      "amd64",
+      "arm64"
+    ]
   }
 }

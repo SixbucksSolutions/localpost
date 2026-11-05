@@ -1,7 +1,9 @@
 # Container deployment
 
-The v0.2.0 container workflow below is in development and pending release and
-qualification. The published v0.1.0 image and its tested digest remain available.
+The published `ghcr.io/sixbuckssolutions/localpost:0.2.0` image supports Linux
+AMD64 and ARM64. Its multi-platform index digest is
+`sha256:dec50d22196a2d4f87d004752f1a25df17dbf896b83f8abcf3586a887116c77f`.
+The published v0.1.0 image and its tested digest remain available.
 See the [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/6889c8c/docs/containers.md)
 for that release's unversioned API and recorded test matrix.
 
@@ -16,8 +18,7 @@ at the same absolute path in the container and on the host. Run the daemon under
 the consuming agent's UID and GID. Mailbox directories use `0700` and files use
 `0600`. The root is supplied explicitly and has no implicit daemon default.
 
-The example expects a locally built and qualified v0.2.0 image tagged
-`localpost:0.2.0`. It does not imply a published image.
+The example uses the published v0.2.0 image.
 
 ```sh
 umask 077
@@ -27,7 +28,7 @@ chmod 700 "$mailbox_root"
 docker run -d --name localpost --network host --read-only --stop-timeout 40 \
   --user "$(id -u):$(id -g)" \
   --mount "type=bind,src=$mailbox_root,dst=$mailbox_root" \
-  localpost:0.2.0 --mailbox-root "$mailbox_root"
+  ghcr.io/sixbuckssolutions/localpost:0.2.0 --mailbox-root "$mailbox_root"
 ```
 
 Use a path without commas because Docker's `--mount` syntax uses commas as
@@ -68,6 +69,12 @@ matrix is evidence of the environments tested and carries no support commitment.
 
 
 ## Qualification and publication
+
+The [native image qualification run](https://github.com/SixbucksSolutions/localpost/actions/runs/42065893180)
+passed on both architectures before publication. The versioned index is published.
+The [publication run](https://github.com/SixbucksSolutions/localpost/actions/runs/42068027114)
+passed anonymous pull and runtime checks on both architectures and promoted
+`latest`.
 
 The `Publish qualified containers` workflow defaults `publish` to `false`.
 That mode obtains the exact candidate artifact identified by

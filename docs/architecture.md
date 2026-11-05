@@ -1,6 +1,6 @@
 # High-level architecture
 
-**Status:** v0.2.0 development is pending release. One-listener architecture. The executable, UUID-addressed mailbox
+**Status:** v0.2.0 is released with a one-listener architecture. The executable, UUID-addressed mailbox
 registration, message delivery, unregistration, and browser CORS are implemented.
 Bounded robustness qualification accompanies the core. A headless Chrome pilot
 has also exercised the browser-to-file diagnostic feedback loop on Windows.
@@ -11,7 +11,7 @@ Accepted decisions are recorded in the [ADR ledger](adr/README.md).
 Implement the daemon in **Go**, with a standard-library-first approach and a
 standalone executable per supported target. [ADR 0006](adr/0006-go-implementation-language.md)
 records the choice over Rust and its maintenance tradeoffs. Development uses
-Go 1.27.3; release targets, packaging, and any future dependencies remain open.
+Go 1.27.3. The release notes record the qualified targets and packaging.
 
 Go's HTTP and filesystem APIs provide building blocks, not proof of the delivery
 contract. In particular, atomic publication without overwriting another delivery
@@ -200,8 +200,8 @@ The implementation should establish these properties before release:
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
 concurrency qualification tests, plus a Linux race-instrumented CI run. Release
-artifact qualification supports the [published v0.1.0 release](releases/v0.1.0.md). The
+artifact qualification supports the [published v0.2.0 release](releases/v0.2.0.md). The
 [browser pilot](../examples/browser-diagnostics/README.md) records its verified
 headless Chrome workflow; it does not establish cross-browser coverage.
 First-release targets and artifact/publication rules are recorded in
-[ADR 0008](adr/0008-first-release-scope.md). The v0.2.0 candidate requires its own qualification.
+[ADR 0008](adr/0008-first-release-scope.md).
