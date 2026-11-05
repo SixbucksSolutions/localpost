@@ -57,20 +57,27 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation failed. Run npm ci if dependencies are missing.' }
     & node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs scripts/qualify-packaged-service.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'OpenAPI validation tests failed.' }
-    foreach ($script in @('container-package.mjs', 'qualify-container.mjs', 'publish-containers.mjs')) {
+    foreach ($script in @('container-package.mjs', 'qualify-container.mjs', 'publish-containers.mjs', 'qualify-adoption.mjs')) {
         & node --check (Join-Path $PSScriptRoot $script)
         if ($LASTEXITCODE -ne 0) { throw "Container tooling syntax check failed: $script" }
     }
+    & node --check deploy/valkey-webdis/qualify.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Adoption runtime syntax check failed.' }
+    & node --test scripts/qualify-adoption.test.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Adoption qualifier tests failed.' }
     & node --test scripts/publish-containers.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Container publication tests failed.' }
     & node --check scripts/test-windows-service-upload.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Windows service upload probe syntax check failed.' }
-    foreach ($script in @('install-service.ps1', 'test-windows-service.ps1')) {
+    foreach ($script in @('install-service.ps1', 'test-windows-service.ps1', 'build-adoption-candidate.ps1', 'build-adoption-candidate.test.ps1')) {
         $parseTokens = $null
         $parseErrors = $null
         [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $script), [ref]$parseTokens, [ref]$parseErrors) | Out-Null
-        if ($parseErrors.Count -gt 0) { throw "Windows service script syntax check failed: $script" }
+        if ($parseErrors.Count -gt 0) { throw "PowerShell script syntax check failed: $script" }
     }
+    & (Join-Path $PSScriptRoot 'build-adoption-candidate.test.ps1')
+    if (-not $?) { throw 'Adoption candidate packaging tests failed.' }
+
     if ($ServiceUrl) {
         if (-not $MailboxRoot) { throw 'Live service checks require -MailboxRoot for the expected server root.' }
         & node scripts/check-openapi-service.mjs $ServiceUrl $MailboxRoot
@@ -88,6 +95,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'go build failed.' }
     & go build -buildvcs=false -o bin/localpost-client.exe ./cmd/localpost-client
     if ($LASTEXITCODE -ne 0) { throw 'client build failed.' }
+    & node --check scripts/qualify-client-process.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Client process proof syntax check failed.' }
+    & node scripts/qualify-client-process.mjs bin/localpost-client.exe
+    if ($LASTEXITCODE -ne 0) { throw 'Native client process proof failed.' }
 }
 finally {
     $env:GOTOOLCHAIN = $previousToolchain

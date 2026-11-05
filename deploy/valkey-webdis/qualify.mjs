@@ -1,3 +1,4 @@
+import {qualifyAdoption} from '../../scripts/qualify-adoption.mjs';
 import assert from 'node:assert/strict';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -122,14 +123,27 @@ try {
   assert.deepEqual(before.XRANGE.map(entry => Buffer.from(entry.msg.data.slice(4), 'base64').toString()), payloads);
   assert.deepEqual(await command(`XRANGE/${key}/-/+`), before);
   assert.ok(before.XRANGE.every(entry => entry.msg.data.startsWith('b64:')));
+  let adoption;
+  if (process.env.LOCALPOST_CLIENT_BINARY) {
+    adoption = await qualifyAdoption({
+      client: process.env.LOCALPOST_CLIENT_BINARY, baseUrl: base,
+      recordEvidence(value) { evidence.adoption = value; },
+      setCapacity(value) {
+        assert.equal(compose('exec', '-T', 'valkey', 'valkey-cli', '--raw', 'CONFIG', 'SET', 'maxmemory', value).trim(), 'OK');
+      },
+    });
+    evidence.adoption = adoption.evidence;
+  }
   stopCleanly('webdis', webdis.Id);
   compose('start', 'webdis');
   await ready();
   assert.deepEqual(await command(`XRANGE/${key}/-/+`), before);
+  adoption?.verifyFrontendRestart();
   stopCleanly('valkey', valkey.Id);
   compose('start', 'valkey');
   await ready();
   assert.deepEqual((await command(`XRANGE/${key}/-/+`)).XRANGE, []);
+  adoption?.verifyRestart();
   const changes = ids.map(id => execFileSync('docker', ['diff', id], {encoding: 'utf8'}));
   assert.deepEqual(changes, ['', '']);
   stopCleanly('webdis', webdis.Id);
