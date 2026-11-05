@@ -268,3 +268,56 @@ func TestActualGitArchiveExtraction(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestReleaseTargets(t *testing.T) {
+	for _, value := range []string{"windows/amd64,linux/amd64", "linux/arm64"} {
+		got, err := parseTargets(value)
+		if err != nil || strings.Join(got, ",") != value {
+			t.Fatalf("targets %q: %v, %v", value, got, err)
+		}
+	}
+	for _, value := range []string{"", "linux", "linux/arm64,linux/arm64", "windows/arm64", "linux/amd64,"} {
+		if _, err := parseTargets(value); err == nil {
+			t.Fatalf("accepted invalid targets %q", value)
+		}
+	}
+}
+
+func TestARM64BuildEnvironment(t *testing.T) {
+	t.Setenv("GOARM64", "v9.5")
+	t.Setenv("CGO_ENABLED", "1")
+	values := make(map[string]string)
+	for _, setting := range buildEnv("linux/arm64") {
+		key, value, _ := strings.Cut(setting, "=")
+		values[key] = value
+	}
+	for key, want := range map[string]string{"GOOS": "linux", "GOARCH": "arm64", "GOARM64": "v8.0", "CGO_ENABLED": "0"} {
+		if values[key] != want {
+			t.Errorf("%s = %q, want %q", key, values[key], want)
+		}
+	}
+}
+
+func TestResolveSource(t *testing.T) {
+	commit := strings.Repeat("b", 40)
+	run := func(_ string, _ []string, name string, args ...string) ([]byte, error) {
+		want := []string{"-c", "safe.directory=checkout", "rev-parse", "--verify", "--end-of-options", "v0.1.0^{commit}"}
+		if name != "git" || !reflect.DeepEqual(args, want) {
+			t.Fatalf("unexpected source resolution %s %v", name, args)
+		}
+		return []byte(commit + "\n"), nil
+	}
+	got, err := resolveSource(run, "checkout", "v0.1.0")
+	if err != nil || got != commit {
+		t.Fatalf("resolved source %q, %v", got, err)
+	}
+	if _, err = resolveSource(run, "checkout", ""); err == nil {
+		t.Fatal("accepted empty source revision")
+	}
+	bad := func(_ string, _ []string, _ string, _ ...string) ([]byte, error) {
+		return []byte("short"), nil
+	}
+	if _, err = resolveSource(bad, "checkout", "tag"); err == nil {
+		t.Fatal("accepted unidentified source revision")
+	}
+}

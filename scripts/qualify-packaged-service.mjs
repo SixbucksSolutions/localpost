@@ -30,7 +30,7 @@ export function parseArguments(args) {
 }
 
 // Reject links and require each executable/identity file to be a direct package child.
-export async function inspectPackage({ packageDir, expectedCommit, run = execute }) {
+export async function inspectPackage({ packageDir, expectedCommit, run = execute, host = process }) {
   assert.match(expectedCommit, /^[0-9a-f]{40}$/);
   const root = await realpath(packageDir);
   const read = async (name) => {
@@ -43,18 +43,19 @@ export async function inspectPackage({ packageDir, expectedCommit, run = execute
   const contractBytes = await read('openapi.json');
   const manifest = JSON.parse(manifestBytes);
   const document = JSON.parse(contractBytes);
-  const target = `${process.platform === 'win32' ? 'windows' : process.platform}/${process.arch}`;
-  assert.ok(['windows/amd64', 'linux/amd64'].includes(target.replace('/x64', '/amd64')), 'Unsupported qualification host');
+  const target = `${host.platform === 'win32' ? 'windows' : host.platform}/${host.arch === 'x64' ? 'amd64' : host.arch}`;
+  assert.ok(['windows/amd64', 'linux/amd64', 'linux/arm64'].includes(target), 'Unsupported qualification host');
   assert.equal(manifest.version, '0.1.0');
   assert.equal(manifest.sourceCommit, expectedCommit);
-  assert.equal(manifest.target, target.replace('/x64', '/amd64'));
+  assert.equal(manifest.target, target);
   assert.equal(manifest.toolchain, 'go1.27.3');
   assert.equal(manifest.settings?.CGO_ENABLED, '0');
-  assert.equal(manifest.settings?.GOAMD64, 'v1');
+  assert.equal(manifest.settings?.GOAMD64, host.arch === 'arm64' ? undefined : 'v1');
+  assert.equal(manifest.settings?.GOARM64, host.arch === 'arm64' ? 'v8.0' : undefined);
   assert.equal(manifest.settings?.trimpath, 'true');
   assert.equal(manifest.settings?.buildvcs, 'false');
   assert.equal(document.info.version, '0.1.0');
-  const binaryName = process.platform === 'win32' ? 'localpost.exe' : 'localpost';
+  const binaryName = host.platform === 'win32' ? 'localpost.exe' : 'localpost';
   const binaryBytes = await read(binaryName);
   assert.match(manifest.binarySHA256, /^[0-9a-f]{64}$/);
   assert.equal(digest(binaryBytes), manifest.binarySHA256, 'Packaged binary hash mismatch');

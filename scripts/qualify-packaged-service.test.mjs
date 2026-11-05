@@ -11,14 +11,16 @@ const commit = '1'.repeat(40);
 const id = '4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b';
 const delivered = 'localpost_019a4fb0-1a00-7000-8000-000000000001.dat';
 const binary = process.platform === 'win32' ? 'localpost.exe' : 'localpost';
-const target = `${process.platform === 'win32' ? 'windows' : process.platform}/amd64`;
+const target = `${process.platform === 'win32' ? 'windows' : process.platform}/${process.arch === 'x64' ? 'amd64' : process.arch}`;
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-async function fixture(t) {
+async function fixture(t, host = process) {
   const directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'localpost-identity-test-')));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  const manifest = { version: '0.1.0', sourceCommit: commit, target, toolchain: 'go1.27.3', binarySHA256: hash('test binary'), settings: { CGO_ENABLED: '0', GOAMD64: 'v1', trimpath: 'true', buildvcs: 'false' } };
-  await writeFile(path.join(directory, binary), 'test binary');
+  const packageTarget = `${host.platform === 'win32' ? 'windows' : host.platform}/${host.arch === 'x64' ? 'amd64' : host.arch}`;
+  const architectureSettings = host.arch === 'arm64' ? { GOARM64: 'v8.0' } : { GOAMD64: 'v1' };
+  const manifest = { version: '0.1.0', sourceCommit: commit, target: packageTarget, toolchain: 'go1.27.3', binarySHA256: hash('test binary'), settings: { CGO_ENABLED: '0', ...architectureSettings, trimpath: 'true', buildvcs: 'false' } };
+  await writeFile(path.join(directory, host.platform === 'win32' ? 'localpost.exe' : 'localpost'), 'test binary');
   await writeFile(path.join(directory, 'openapi.json'), JSON.stringify({ info: { version: '0.1.0' } }));
   const save = () => writeFile(path.join(directory, 'build-info.json'), JSON.stringify(manifest));
   await save();
@@ -62,6 +64,49 @@ test('rejects wrong manifest, mismatched bytes and linked package members before
   // Directory links work without Windows developer-mode symlink privileges.
   await symlink(directory, path.join(directory, binary), process.platform === 'win32' ? 'junction' : 'dir');
   await assert.rejects(inspectPackage(options));
+});
+
+for (const host of [{ platform: 'win32', arch: 'x64' }, { platform: 'linux', arch: 'x64' }, { platform: 'linux', arch: 'arm64' }]) {
+  test(`accepts native ${host.platform}/${host.arch} package identity`, async (t) => {
+    const { directory, manifest } = await fixture(t, host);
+    const result = await inspectPackage({ packageDir: directory, expectedCommit: commit, host, run: async (command) => {
+      assert.equal(command, path.join(directory, host.platform === 'win32' ? 'localpost.exe' : 'localpost'));
+      return { stdout: `localpost 0.1.0 (commit ${commit}; go1.27.3; ${manifest.target})\n`, stderr: '' };
+    } });
+    assert.equal(result.identity.target, manifest.target);
+  });
+}
+
+test('rejects incompatible ARM64 targets and build settings before execution', async (t) => {
+  const host = { platform: 'linux', arch: 'arm64' };
+  const { directory, manifest, save } = await fixture(t, host);
+  const original = structuredClone(manifest);
+  const options = { packageDir: directory, expectedCommit: commit, host, run: () => assert.fail('Invalid package executed') };
+  for (const change of [
+    (value) => { value.target = 'linux/amd64'; },
+    (value) => { value.target = 'windows/arm64'; },
+    (value) => { value.settings.CGO_ENABLED = '1'; },
+    (value) => { delete value.settings.GOARM64; },
+    (value) => { value.settings.GOARM64 = 'v8.1'; },
+    (value) => { value.settings.GOAMD64 = 'v1'; },
+  ]) {
+    Object.assign(manifest, structuredClone(original));
+    change(manifest);
+    await save();
+    await assert.rejects(inspectPackage(options));
+  }
+  Object.assign(manifest, original);
+  await save();
+  await assert.rejects(inspectPackage({ ...options, host: { platform: 'win32', arch: 'arm64' } }), /Unsupported qualification host/);
+  await assert.rejects(inspectPackage({ ...options, host: { platform: 'linux', arch: 'x64' } }));
+});
+
+test('rejects ARM64 tuning in an AMD64 package before execution', async (t) => {
+  const host = { platform: 'linux', arch: 'x64' };
+  const { directory, manifest, save } = await fixture(t, host);
+  manifest.settings.GOARM64 = 'v8.0';
+  await save();
+  await assert.rejects(inspectPackage({ packageDir: directory, expectedCommit: commit, host, run: () => assert.fail('Invalid package executed') }));
 });
 
 async function fakeServer(t, { premature = false, cleanupFails = false } = {}) {

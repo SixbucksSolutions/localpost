@@ -47,13 +47,15 @@ type manifest struct {
 func main() {
 	version := flag.String("version", "", "release version (for example 0.1.0)")
 	output := flag.String("output", "", "new or empty candidate output directory")
+	sourceRef := flag.String("source-ref", "HEAD", "Git source revision to archive")
+	targets := flag.String("targets", "windows/amd64,linux/amd64", "comma-separated package targets")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		// Reporting failure is best effort immediately before process exit.
 		_, _ = fmt.Fprintln(os.Stderr, "unexpected positional arguments")
 		os.Exit(1)
 	}
-	if err := release(*version, *output, runCommand); err != nil {
+	if err := release(*version, *output, *sourceRef, *targets, runCommand); err != nil {
 		// Reporting failure is best effort immediately before process exit.
 		_, _ = fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -102,7 +104,11 @@ func preflight(run commandRunner, dir, version string) (string, error) {
 }
 
 func buildEnv(target string) []string {
-	overrides := map[string]string{"GOTOOLCHAIN": toolchain, "GOENV": "off", "GOROOT": "", "GO111MODULE": "on", "GOFIPS140": "off", "GOWORK": "off", "GOFLAGS": "", "GOEXPERIMENT": "", "CGO_ENABLED": "0", "GOAMD64": "v1", "GOOS": target, "GOARCH": "amd64"}
+	goos, goarch, full := strings.Cut(target, "/")
+	if !full {
+		goarch = "amd64"
+	}
+	overrides := map[string]string{"GOTOOLCHAIN": toolchain, "GOENV": "off", "GOROOT": "", "GO111MODULE": "on", "GOFIPS140": "off", "GOWORK": "off", "GOFLAGS": "", "GOEXPERIMENT": "", "CGO_ENABLED": "0", "GOAMD64": "v1", "GOARM64": "v8.0", "GOOS": goos, "GOARCH": goarch}
 	env := make([]string, 0, len(os.Environ())+len(overrides))
 	for _, value := range os.Environ() {
 		key, _, _ := strings.Cut(value, "=")
@@ -121,7 +127,38 @@ func buildEnv(target string) []string {
 	return env
 }
 
-func release(version, output string, run commandRunner) (resultErr error) {
+func parseTargets(value string) ([]string, error) {
+	targets := strings.Split(value, ",")
+	seen := make(map[string]bool)
+	for _, target := range targets {
+		if (target != "windows/amd64" && target != "linux/amd64" && target != "linux/arm64") || seen[target] {
+			return nil, errors.New("targets must be unique windows/amd64, linux/amd64 or linux/arm64 entries")
+		}
+		seen[target] = true
+	}
+	return targets, nil
+}
+
+func resolveSource(run commandRunner, root, sourceRef string) (string, error) {
+	if sourceRef == "" {
+		return "", errors.New("source-ref must not be empty")
+	}
+	value, err := git(run, root, "rev-parse", "--verify", "--end-of-options", sourceRef+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	commit := strings.TrimSpace(string(value))
+	if !commitPattern.MatchString(commit) {
+		return "", errors.New("git did not return a full source commit")
+	}
+	return commit, nil
+}
+
+func release(version, output, sourceRef, targetList string, run commandRunner) (resultErr error) {
+	targets, err := parseTargets(targetList)
+	if err != nil {
+		return err
+	}
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -134,6 +171,12 @@ func release(version, output string, run commandRunner) (resultErr error) {
 	commit, err := preflight(run, root, version)
 	if err != nil {
 		return err
+	}
+	if sourceRef != "HEAD" {
+		commit, err = resolveSource(run, root, sourceRef)
+		if err != nil {
+			return err
+		}
 	}
 	if output == "" {
 		return errors.New("--output is required")
@@ -197,10 +240,11 @@ func release(version, output string, run commandRunner) (resultErr error) {
 	if err != nil {
 		return err
 	}
-	sums := make([]string, 0, 2)
-	for _, target := range []string{"windows", "linux"} {
+	sums := make([]string, 0, len(targets))
+	for _, target := range targets {
+		goos, goarch, _ := strings.Cut(target, "/")
 		name := "localpost"
-		if target == "windows" {
+		if goos == "windows" {
 			name += ".exe"
 		}
 		binaryPath := filepath.Join(temp, name)
@@ -213,7 +257,13 @@ func release(version, output string, run commandRunner) (resultErr error) {
 		if readErr != nil {
 			return readErr
 		}
-		info := manifest{version, commit, toolchain, target + "/amd64", map[string]string{"CGO_ENABLED": "0", "GOAMD64": "v1", "GO111MODULE": "on", "GOFIPS140": "off", "GOENV": "off", "GOEXPERIMENT": "", "GOFLAGS": "", "GOWORK": "off", "trimpath": "true", "buildvcs": "false", "ldflags": ldflags}, digest(binary)}
+		settings := map[string]string{"CGO_ENABLED": "0", "GO111MODULE": "on", "GOFIPS140": "off", "GOENV": "off", "GOEXPERIMENT": "", "GOFLAGS": "", "GOWORK": "off", "trimpath": "true", "buildvcs": "false", "ldflags": ldflags}
+		if goarch == "arm64" {
+			settings["GOARM64"] = "v8.0"
+		} else {
+			settings["GOAMD64"] = "v1"
+		}
+		info := manifest{version, commit, toolchain, target, settings, digest(binary)}
 		metadata, marshalErr := json.MarshalIndent(info, "", "  ")
 		if marshalErr != nil {
 			return marshalErr
@@ -225,13 +275,13 @@ func release(version, output string, run commandRunner) (resultErr error) {
 			return noticeErr
 		}
 		entries = append(entries, notices...)
-		base := "localpost_" + version + "_" + target + "_amd64"
-		archive, archiveErr := archiveBytes(base, entries, target == "windows")
+		base := "localpost_" + version + "_" + goos + "_" + goarch
+		archive, archiveErr := archiveBytes(base, entries, goos == "windows")
 		if archiveErr != nil {
 			return archiveErr
 		}
 		extension := ".tar.gz"
-		if target == "windows" {
+		if goos == "windows" {
 			extension = ".zip"
 		}
 		filename := base + extension

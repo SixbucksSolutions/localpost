@@ -183,6 +183,38 @@ The [candidate workflow](.github/workflows/release-candidate.yml) builds twice,
 compares checksums and retains one exact artifact set for later qualification.
 It does not create a public release or replace the running shared daemon.
 
+### Additional Linux certification
+
+The [platform certification workflow](.github/workflows/certify-platforms.yml)
+has two manually selected waves. Run either from a clean, reviewed commit on main.
+
+```sh
+gh workflow run certify-platforms.yml --field architecture=amd64
+gh workflow run certify-platforms.yml --field architecture=arm64
+```
+
+| Wave | Environments |
+| --- | --- |
+| `amd64` | Ubuntu 24.04 and Alpine 3.24.3 |
+| `arm64` | Ubuntu 24.04, Ubuntu 26.04 and Alpine 3.24.3 |
+
+Ubuntu checks run directly on native-architecture GitHub-hosted VMs. Alpine
+checks run in native-architecture containers on Ubuntu 26.04, sharing the host
+kernel and a bind-mounted filesystem. Evidence records the actual OS, kernel,
+filesystem and image digest. This scope covers Alpine userspace compatibility.
+
+The AMD64 wave downloads and verifies the published v0.1.0 archive. The ARM64
+wave builds an unpublished test package twice from the original v0.1.0 source,
+using the release builder's `--source-ref v0.1.0 --targets linux/arm64` options.
+The defaults remain the current commit and both AMD64 targets. ARM64 uses
+`CGO_ENABLED=0` and `GOARM64=v8.0`.
+
+Both waves check package identity, ordinary-user startup with an empty `PATH`,
+default and overridden ports, occupied-port rejection, API/CORS behavior,
+byte-exact publication, disconnect cleanup, storage failures and graceful shutdown.
+CI retains reports, checksums and the ARM64 test package for 90 days. Successful
+runs provide review evidence; publishing additional release assets is a separate step.
+
 ## Registration API
 
 The control API uses JSON for requests, success responses, and application errors.
