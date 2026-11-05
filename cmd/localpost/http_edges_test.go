@@ -18,7 +18,7 @@ import (
 
 func newHTTPEdgeAdmin(t *testing.T, timeout time.Duration) (*httptest.Server, *registry) {
 	t.Helper()
-	r := newRegistry()
+	r := newRegistry(t.TempDir())
 	t.Cleanup(r.close)
 	server := httptest.NewUnstartedServer(withCORS(r, "POST, DELETE, OPTIONS"))
 	server.Config.ReadTimeout = timeout
@@ -73,9 +73,9 @@ func TestHTTPAdminEarlyRejection(t *testing.T) {
 			code                      string
 		}{
 			{"path", "POST", "/missing", "application/json", 404, "not_found"},
-			{"method", "PUT", "/registrations", "application/json", 405, "method_not_allowed"},
-			{"delete method", "POST", "/registrations/12345678-1234-4234-8234-123456789abc", "application/json", 405, "method_not_allowed"},
-			{"media", "POST", "/registrations", "text/plain", 415, "unsupported_media_type"},
+			{"method", "PUT", apiPrefix + "/registrations", "application/json", 405, "method_not_allowed"},
+			{"delete method", "POST", apiPrefix + "/registrations/12345678-1234-4234-8234-123456789abc", "application/json", 405, "method_not_allowed"},
+			{"media", "POST", apiPrefix + "/registrations", "text/plain", 415, "unsupported_media_type"},
 		} {
 			t.Run(tc.name+framing, func(t *testing.T) {
 				server, r := newHTTPEdgeAdmin(t, 2*time.Second)
@@ -105,7 +105,7 @@ func TestHTTPAdminStalledBody(t *testing.T) {
 		t.Run(framing, func(t *testing.T) {
 			server, r := newHTTPEdgeAdmin(t, 50*time.Millisecond)
 			connection := deliveryConnection(t, server)
-			if _, err := io.WriteString(connection, "POST /registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"+framing); err != nil {
+			if _, err := io.WriteString(connection, "POST "+apiPrefix+"/registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n"+framing); err != nil {
 				t.Fatal(err)
 			}
 			reader := bufio.NewReader(connection)
@@ -131,7 +131,7 @@ func TestHTTPExpectContinue(t *testing.T) {
 				path, length := "/messages", messageBodyLimit+1
 				if surface == "admin" {
 					server, r = newHTTPEdgeAdmin(t, 2*time.Second)
-					path, length = "/registrations", registrationBodyLimit+1
+					path, length = apiPrefix+"/registrations", registrationBodyLimit+1
 				} else {
 					server = httptest.NewServer(withCORS(newMessageHandler(directory), "POST, OPTIONS"))
 					t.Cleanup(server.Close)
@@ -161,11 +161,11 @@ func TestHTTPExpectContinue(t *testing.T) {
 			var payload, path string
 			if surface == "admin" {
 				server, _ = newHTTPEdgeAdmin(t, time.Second)
-				data, err := json.Marshal(map[string]string{"directory": directory})
+				data, err := json.Marshal(struct{}{})
 				if err != nil {
 					t.Fatal(err)
 				}
-				payload, path = string(data), "/registrations"
+				payload, path = string(data), apiPrefix+"/registrations"
 			} else {
 				server = httptest.NewServer(withCORS(newMessageHandler(directory), "POST, OPTIONS"))
 				t.Cleanup(server.Close)
@@ -284,8 +284,8 @@ func TestHTTPOpaqueContentEncodingAndChunkedReuse(t *testing.T) {
 // idle budget, while control JSON remains bounded by the total read deadline.
 func TestHTTPSharedListenerRouteDeadlines(t *testing.T) {
 	server, r := newHTTPEdgeAdmin(t, 100*time.Millisecond)
-	directory := t.TempDir()
-	_, mailbox := registrationRequest(t, r, directory)
+	_, mailbox := registrationRequest(t, r)
+	directory := mailbox.Directory
 	owner := lifecycleMailbox(r, mailbox.ID)
 	owner.handler.idleTimeout = 90 * time.Millisecond
 	connection := deliveryConnection(t, server)
@@ -303,7 +303,7 @@ func TestHTTPSharedListenerRouteDeadlines(t *testing.T) {
 		t.Fatal("progressing upload closed reusable connection")
 	}
 	assertDirectoryEntries(t, directory, 1)
-	if _, err := io.WriteString(connection, "POST /registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"); err != nil {
+	if _, err := io.WriteString(connection, "POST "+apiPrefix+"/registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{"); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
@@ -327,12 +327,12 @@ func TestHTTPSharedConnectionAcrossRegistrationsAndDelete(t *testing.T) {
 	reader := bufio.NewReader(connection)
 	directories := []string{t.TempDir(), t.TempDir()}
 	var mailboxes []registration
-	for _, directory := range directories {
-		body, err := json.Marshal(map[string]string{"directory": directory})
+	for i := range directories {
+		body, err := json.Marshal(struct{}{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := fmt.Fprintf(connection, "POST /registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
+		if _, err := fmt.Fprintf(connection, "POST "+apiPrefix+"/registrations HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s", len(body), body); err != nil {
 			t.Fatal(err)
 		}
 		response, err := http.ReadResponse(reader, nil)
@@ -346,6 +346,7 @@ func TestHTTPSharedConnectionAcrossRegistrationsAndDelete(t *testing.T) {
 			t.Fatalf("registration on shared connection failed: %d %v %v", response.StatusCode, decodeErr, closeErr)
 		}
 		mailboxes = append(mailboxes, mailbox)
+		directories[i] = mailbox.Directory
 	}
 	for _, mailbox := range mailboxes {
 		if _, err := fmt.Fprintf(connection, "POST %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/octet-stream\r\nContent-Length: 1\r\n\r\nx", messagePath(mailbox.ID)); err != nil {
@@ -355,7 +356,7 @@ func TestHTTPSharedConnectionAcrossRegistrationsAndDelete(t *testing.T) {
 			t.Fatal("upload closed shared connection")
 		}
 	}
-	if _, err := fmt.Fprintf(connection, "DELETE /registrations/%s HTTP/1.1\r\nHost: localhost\r\n\r\n", mailboxes[0].ID); err != nil {
+	if _, err := fmt.Fprintf(connection, "DELETE "+apiPrefix+"/registrations/%s HTTP/1.1\r\nHost: localhost\r\n\r\n", mailboxes[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if readHTTPEdgeResponse(t, reader, 200, "") {

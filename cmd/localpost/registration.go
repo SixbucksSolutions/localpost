@@ -16,11 +16,17 @@ import (
 	"uuid"
 )
 
+const apiPrefix = "/api/2026-11-05"
+
 const registrationBodyLimit = 64 << 10
+const mailboxAllocationAttempts = 8
+
+var errMailboxAllocation = errors.New("mailbox allocation failed")
+var errRegistryClosed = errors.New("registration service is stopping")
 
 type registration struct {
 	ID        string `json:"id"`
-	directory string
+	Directory string `json:"directory"`
 	handler   *messageHandler
 
 	mu       *sync.Mutex
@@ -33,6 +39,9 @@ type registration struct {
 }
 
 type registry struct {
+	root              string
+	newID             func() string
+	mkdir             func(string, os.FileMode) error
 	mu                sync.Mutex
 	gracePeriod       time.Duration
 	registrationLimit int
@@ -41,25 +50,49 @@ type registry struct {
 	registrations     map[string]*registration
 }
 
-func newRegistry() *registry {
-	return &registry{registrations: make(map[string]*registration), gracePeriod: 30 * time.Second, registrationLimit: defaultRegistrationLimit, uploads: newUploadSlots(defaultUploadLimit)}
+func newRegistry(root string) *registry {
+	return &registry{
+		root:              root,
+		newID:             func() string { return uuid.NewV4().String() },
+		mkdir:             os.Mkdir,
+		registrations:     make(map[string]*registration),
+		gracePeriod:       30 * time.Second,
+		registrationLimit: defaultRegistrationLimit,
+		uploads:           newUploadSlots(defaultUploadLimit),
+	}
 }
 
-func (r *registry) register(directory string) (*registration, error) {
+func (r *registry) register() (*registration, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		return nil, errors.New("registration service is stopping")
+		return nil, errRegistryClosed
 	}
 	if len(r.registrations) >= r.registrationLimit {
 		return nil, errRegistrationLimit
 	}
-	id := uuid.NewV4().String()
-	for r.registrations[id] != nil {
-		id = uuid.NewV4().String()
+	var id, directory string
+	allocated := false
+	for range mailboxAllocationAttempts {
+		id = r.newID()
+		if r.registrations[id] != nil {
+			continue
+		}
+		directory = filepath.Join(r.root, id)
+		if err := r.mkdir(directory, 0700); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return nil, errMailboxAllocation
+		}
+		allocated = true
+		break
+	}
+	if !allocated {
+		return nil, errMailboxAllocation
 	}
 	mailbox := &registration{
-		ID: id, directory: directory,
+		ID: id, Directory: directory,
 		mu: &sync.Mutex{}, drained: make(chan struct{}), done: make(chan struct{}),
 		requests: make(map[*activeRequest]struct{}),
 	}
@@ -218,32 +251,61 @@ func (r *registry) unregister(w http.ResponseWriter, id string) {
 	}{mailbox.ID, true, forced})
 }
 
-func validateDirectory(directory string) error {
+func prepareMailboxRoot(directory string) (string, error) {
 	if !filepath.IsAbs(directory) {
-		return errors.New("directory must be an absolute path")
+		return "", errors.New("directory must be an absolute path")
 	}
+	resolved, err := filepath.EvalSymlinks(directory)
+	if err != nil {
+		return "", errors.New("mailbox root must exist and be accessible")
+	}
+	directory = filepath.Clean(resolved)
 	info, err := os.Stat(directory)
 	if err != nil {
-		return errors.New("directory must exist and be accessible")
+		return "", errors.New("directory must exist and be accessible")
 	}
 	if !info.IsDir() {
-		return errors.New("directory must name an existing directory")
+		return "", errors.New("directory must name an existing directory")
 	}
 	probe, err := os.CreateTemp(directory, ".localpost-probe-*")
 	if err != nil {
-		return errors.New("directory must be writable")
+		return "", errors.New("directory must be writable")
 	}
 	name := probe.Name()
 	_, writeErr := probe.Write([]byte("localpost directory probe\n"))
 	closeErr := probe.Close()
 	removeErr := os.Remove(name)
 	if writeErr != nil || closeErr != nil || removeErr != nil {
-		return errors.New("directory must support writing and removing temporary files")
+		return "", errors.New("directory must support writing and removing temporary files")
 	}
-	return nil
+	return directory, nil
+}
+
+// rejectUnsupportedAPIVersion also runs before CORS preflight handling so an
+// obsolete client receives the migration error for every HTTP method.
+func rejectUnsupportedAPIVersion(w http.ResponseWriter, request *http.Request) bool {
+	path := request.URL.Path
+	if path == apiPrefix || strings.HasPrefix(path, apiPrefix+"/") {
+		return false
+	}
+	if path == "/registrations" || strings.HasPrefix(path, "/registrations/") || path == "/api" || strings.HasPrefix(path, "/api/") {
+		abortMessageBody(w, http.NewResponseController(w))
+		writeAPIError(w, http.StatusNotFound, "unsupported_api_version", "use the supported API prefix "+apiPrefix)
+		return true
+	}
+	return false
 }
 
 func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
+	if rejectUnsupportedAPIVersion(w, request) {
+		return
+	}
+	// Registration and delivery internals operate on paths relative to the one
+	// supported public API prefix. The original request remains unchanged.
+	if strings.HasPrefix(request.URL.Path, apiPrefix+"/") {
+		request = request.Clone(request.Context())
+		request.URL.Path = strings.TrimPrefix(request.URL.Path, apiPrefix)
+	}
 	controller := http.NewResponseController(w)
 	if suffix, ok := strings.CutPrefix(request.URL.Path, "/registrations/"); ok {
 		parts := strings.Split(suffix, "/")
@@ -315,30 +377,28 @@ func (r *registry) ServeHTTP(w http.ResponseWriter, request *http.Request) {
 		}
 		return
 	}
-	var input *struct {
-		Directory string `json:"directory"`
-	}
+	var input *struct{}
 	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&input); err != nil || input == nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_request", "body must be one JSON object containing directory")
+		writeAPIError(w, http.StatusBadRequest, "invalid_request", "body must be one empty JSON object")
 		return
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
 		writeAPIError(w, http.StatusBadRequest, "invalid_request", "body must contain exactly one JSON object")
 		return
 	}
-	if err := validateDirectory(input.Directory); err != nil {
-		writeAPIError(w, http.StatusBadRequest, "invalid_directory", err.Error())
-		return
-	}
-	mailbox, err := r.register(input.Directory)
+	mailbox, err := r.register()
 	if errors.Is(err, errRegistrationLimit) {
 		writeAPIError(w, http.StatusServiceUnavailable, "registration_limit", "live registration limit reached")
 		return
 	}
+	if errors.Is(err, errMailboxAllocation) {
+		writeAPIError(w, http.StatusInternalServerError, "mailbox_allocation_failed", "unable to allocate mailbox")
+		return
+	}
 	if err != nil {
-		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "mailbox allocation unavailable")
+		writeAPIError(w, http.StatusServiceUnavailable, "unavailable", "registration service is stopping")
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

@@ -61,7 +61,7 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	registry := newRegistry()
+	registry := newRegistry(t.TempDir())
 	done := make(chan error, 1)
 	go func() { done <- serveWithRegistry(ctx, listener, registry) }()
 	t.Cleanup(func() {
@@ -80,22 +80,23 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 	admin := "http://" + listener.Addr().String()
 	dirs := []string{t.TempDir(), t.TempDir()}
 	mailboxes := make([]registration, 2)
-	for i, dir := range dirs {
-		body, err := json.Marshal(map[string]string{"directory": dir})
+	for i := range dirs {
+		body, err := json.Marshal(struct{}{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		data, _, status := corsRequest(t, client, "POST", admin+"/registrations", "application/json", body)
+		data, _, status := corsRequest(t, client, "POST", admin+apiPrefix+"/registrations", "application/json", body)
 		if status != http.StatusOK {
 			t.Fatalf("register status %d: %s", status, data)
 		}
 		if err := json.Unmarshal(data, &mailboxes[i]); err != nil {
 			t.Fatal(err)
 		}
+		dirs[i] = mailboxes[i].Directory
 	}
 	targets := []struct{ url, methods string }{
-		{admin + "/registrations", "POST, DELETE, OPTIONS"},
-		{admin + "/registrations/" + mailboxes[0].ID, "POST, DELETE, OPTIONS"},
+		{admin + apiPrefix + "/registrations", "POST, DELETE, OPTIONS"},
+		{admin + apiPrefix + "/registrations/" + mailboxes[0].ID, "POST, DELETE, OPTIONS"},
 		{admin + messagePath(mailboxes[0].ID), "POST, DELETE, OPTIONS"},
 	}
 	for _, target := range targets {
@@ -119,7 +120,7 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 			t.Fatalf("missing route status %d", status)
 		}
 	}
-	_, _, status := corsRequest(t, client, "POST", admin+"/registrations", "application/json", []byte("{"))
+	_, _, status := corsRequest(t, client, "POST", admin+apiPrefix+"/registrations", "application/json", []byte("{"))
 	if status != http.StatusBadRequest {
 		t.Fatalf("invalid registration status %d", status)
 	}
@@ -166,9 +167,9 @@ func TestCORSJoinedCoreLifecycle(t *testing.T) {
 }
 
 func TestCORSIncompletePreflightBody(t *testing.T) {
-	registry := newRegistry()
+	registry := newRegistry(t.TempDir())
 	defer registry.close()
-	_, mailbox := registrationRequest(t, registry, t.TempDir())
+	_, mailbox := registrationRequest(t, registry)
 	admin, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +183,7 @@ func TestCORSIncompletePreflightBody(t *testing.T) {
 			t.Error(err)
 		}
 	}()
-	for _, path := range []string{"/registrations", messagePath(mailbox.ID)} {
+	for _, path := range []string{apiPrefix + "/registrations", messagePath(mailbox.ID)} {
 		address := admin.Addr().String()
 		for _, framing := range []string{
 			"Content-Length: 4\r\n\r\nx",
@@ -223,7 +224,7 @@ func TestCORSIncompletePreflightBody(t *testing.T) {
 	if registrationCount(registry) != 1 {
 		t.Fatal("incomplete preflight changed registry")
 	}
-	entries, err := os.ReadDir(registry.registrations[mailbox.ID].directory)
+	entries, err := os.ReadDir(registry.registrations[mailbox.ID].Directory)
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("incomplete preflight created files: %v, %v", entries, err)
 	}
@@ -231,7 +232,7 @@ func TestCORSIncompletePreflightBody(t *testing.T) {
 
 func TestCORSOriginUnrestricted(t *testing.T) {
 	for _, origin := range []string{"null", "https://unlisted.example", "http://localhost:9999", ""} {
-		request, err := http.NewRequest("OPTIONS", "http://localhost/messages", strings.NewReader(""))
+		request, err := http.NewRequest("OPTIONS", "http://localhost"+apiPrefix+"/registrations", strings.NewReader(""))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -20,6 +20,7 @@ const defaultPort = 53147
 
 type config struct {
 	port        int
+	mailboxRoot string
 	showVersion bool
 }
 
@@ -28,6 +29,7 @@ func parseConfig(args []string, output io.Writer) (config, error) {
 	flags := flag.NewFlagSet("localpost", flag.ContinueOnError)
 	flags.SetOutput(output)
 	flags.IntVar(&cfg.port, "port", defaultPort, "TCP port (1024-65535)")
+	flags.StringVar(&cfg.mailboxRoot, "mailbox-root", "", "Existing absolute mailbox root directory (required)")
 	flags.BoolVar(&cfg.showVersion, "version", false, "Print version and exit")
 	if err := flags.Parse(args); err != nil {
 		return config{}, err
@@ -45,6 +47,10 @@ func run(ctx context.Context, cfg config, output io.Writer) error {
 	if cfg.showVersion {
 		return writeVersion(output)
 	}
+	root, err := prepareMailboxRoot(cfg.mailboxRoot)
+	if err != nil {
+		return fmt.Errorf("mailbox root: %w", err)
+	}
 	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(cfg.port))
 	listener, err := net.Listen("tcp4", address)
 	if err != nil {
@@ -54,11 +60,11 @@ func run(ctx context.Context, cfg config, output io.Writer) error {
 	defer func() { _ = listener.Close() }()
 	// Losing a diagnostic output stream does not change listener ownership.
 	_, _ = fmt.Fprintf(output, "localpost listening on http://%s\n", listener.Addr())
-	return serve(ctx, listener)
+	return serve(ctx, listener, root)
 }
 
-func serve(ctx context.Context, listener net.Listener) error {
-	return serveWithRegistry(ctx, listener, newRegistry())
+func serve(ctx context.Context, listener net.Listener, root string) error {
+	return serveWithRegistry(ctx, listener, newRegistry(root))
 }
 
 func serveWithRegistry(ctx context.Context, listener net.Listener, registrations *registry) error {

@@ -13,7 +13,8 @@ gate between dependent stories. Terry retains control of Completed cards.
 
 ## Registration
 
-The routes retain their current names. `POST /registrations` requires
+The route names are retained under the explicit `/api/2026-11-05` prefix defined
+in [ADR 0010](0010-date-versioned-api.md). `POST /api/2026-11-05/registrations` requires
 `Content-Type: application/json` and one empty JSON object `{}`. Empty bodies,
 `null`, arrays, multiple objects and objects containing fields are rejected with
 `400 invalid_request`. In particular, the former `directory` field is rejected.
@@ -58,7 +59,7 @@ Message uploads preserve the existing opaque bodies, UUIDv7 filenames, limits,
 atomic publication and best-effort behavior. Wildcard CORS and the trusted
 loopback model continue. Registration contains no process or account identity.
 
-`DELETE /registrations/{id}` stops admission and drains accepted work using the
+`DELETE /api/2026-11-05/registrations/{id}` stops admission and drains accepted work using the
 existing deadline. The mailbox directory and its delivered files remain.
 Agents retire their registration before deleting their own mailbox files and
 directory. The service does not purge old directories or restore registrations

@@ -30,13 +30,15 @@ func TestQualificationCombinedCycles(t *testing.T) {
 		registered := make([]registration, 3)
 		owned := make([]*registration, 0, 4)
 		for i := range registered {
-			registered[i] = lifecycleRegister(t, client, url, directories[i])
+			registered[i] = lifecycleRegister(t, client, url)
+			directories[i] = registered[i].Directory
+			retained[i] = map[string][]byte{}
 			owned = append(owned, lifecycleMailbox(r, registered[i].ID))
 			payload := []byte{0, 255, byte(cycle), byte(i), '\r', '\n'}
 			name := qualificationPost(t, client, url, registered[i], payload, http.StatusOK)
 			retained[i][name] = payload
 		}
-		response, _ := registrationRequest(t, r, directories[0])
+		response, _ := registrationRequest(t, r)
 		if response.Code != http.StatusServiceUnavailable {
 			t.Fatalf("cycle %d: registration cap = %d", cycle, response.Code)
 		}
@@ -70,12 +72,12 @@ func TestQualificationCombinedCycles(t *testing.T) {
 		for range cap(replies) {
 			go func() {
 				<-start
-				replies <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered[0].ID)
+				replies <- lifecycleRequest(client, http.MethodDelete, url+apiPrefix+"/registrations/"+registered[0].ID)
 			}()
 		}
 		close(start)
 		lifecycleWait(t, func() bool { owned[0].mu.Lock(); defer owned[0].mu.Unlock(); return owned[0].closing })
-		response, _ = registrationRequest(t, r, directories[0])
+		response, _ = registrationRequest(t, r)
 		if response.Code != http.StatusServiceUnavailable {
 			t.Fatal("draining mailbox released registration capacity early")
 		}
@@ -112,7 +114,10 @@ func TestQualificationCombinedCycles(t *testing.T) {
 		}
 		qualificationReleased(t, r, owned[0])
 
-		replacement := lifecycleRegister(t, client, url, directories[0])
+		qualificationFiles(t, directories[0], retained[0])
+		replacement := lifecycleRegister(t, client, url)
+		directories[0] = replacement.Directory
+		retained[0] = map[string][]byte{}
 		replacementOwner := lifecycleMailbox(r, replacement.ID)
 		owned = append(owned, replacementOwner)
 		pending, pendingReader := qualificationUpload(t, url, replacement)
@@ -151,8 +156,8 @@ func TestQualificationCombinedCycles(t *testing.T) {
 			qualificationFiles(t, directory, retained[i])
 		}
 		client.CloseIdleConnections()
-		// The next cycle binds this same admin address and re-registers the same
-		// directories, proving restart without in-memory ownership or file loss.
+		// The next cycle binds this same admin address and allocates new
+		// mailboxes, proving restart without in-memory ownership.
 	}
 	listener, err := net.Listen("tcp4", address)
 	if err != nil {
@@ -169,7 +174,7 @@ func qualificationServer(t *testing.T, address string) (*registry, string, conte
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := newRegistry()
+	r := newRegistry(t.TempDir())
 	r.registrationLimit = 3
 	r.uploads = newUploadSlots(2)
 	r.gracePeriod = 500 * time.Millisecond

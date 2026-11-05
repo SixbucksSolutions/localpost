@@ -18,14 +18,13 @@ import (
 )
 
 func TestResourceRegistrationConcurrentBoundary(t *testing.T) {
-	r := newRegistry()
+	r := newRegistry(t.TempDir())
 	r.registrationLimit = 4
 	defer r.close()
 	results := make(chan error, 32)
 	start := make(chan struct{})
-	directory := t.TempDir()
 	for range cap(results) {
-		go func() { <-start; _, err := r.register(directory); results <- err }()
+		go func() { <-start; _, err := r.register(); results <- err }()
 	}
 	close(start)
 	accepted := 0
@@ -39,23 +38,26 @@ func TestResourceRegistrationConcurrentBoundary(t *testing.T) {
 	if accepted != 4 || registrationCount(r) != 4 {
 		t.Fatalf("accepted %d registrations", accepted)
 	}
-	response, _ := registrationRequest(t, withCORS(r, "POST, DELETE, OPTIONS"), directory)
+	response, _ := registrationRequest(t, withCORS(r, "POST, DELETE, OPTIONS"))
 	if response.Code != 503 || !strings.Contains(response.Body.String(), `"code":"registration_limit"`) || response.Header().Get("Access-Control-Allow-Origin") != "*" {
 		t.Fatalf("saturation response: %d %s", response.Code, response.Body.String())
 	}
 }
 
 func TestResourceRegistrationFailedValidationReusesCapacity(t *testing.T) {
-	r := newRegistry()
+	r := newRegistry(t.TempDir())
 	r.registrationLimit = 1
 	defer r.close()
 
-	response, _ := registrationRequest(t, r, filepath.Join(t.TempDir(), "missing"))
-	if response.Code != http.StatusBadRequest {
+	originalRoot := r.root
+	r.root = filepath.Join(originalRoot, "missing")
+	response, _ := registrationRequest(t, r)
+	r.root = originalRoot
+	if response.Code != http.StatusInternalServerError {
 		t.Fatal("invalid directory unexpectedly succeeded")
 	}
 
-	if _, err := r.register(t.TempDir()); err != nil {
+	if _, err := r.register(); err != nil {
 		t.Fatalf("failed allocation consumed capacity: %v", err)
 	}
 }
@@ -64,14 +66,16 @@ func TestResourceRegistrationClosingRetainsCapacity(t *testing.T) {
 	r, url, _, _ := lifecycleServer(t, 2*time.Second)
 	r.registrationLimit = 1
 	client := lifecycleClient(t)
-	directory := t.TempDir()
-	registered := lifecycleRegister(t, client, url, directory)
+	registered := lifecycleRegister(t, client, url)
+	directory := registered.Directory
 	mailbox := lifecycleMailbox(r, registered.ID)
 	conn, reader := lifecycleUpload(t, url, registered, directory)
 	deleted := make(chan lifecycleReply, 1)
-	go func() { deleted <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered.ID) }()
+	go func() {
+		deleted <- lifecycleRequest(client, http.MethodDelete, url+apiPrefix+"/registrations/"+registered.ID)
+	}()
 	lifecycleWait(t, func() bool { mailbox.mu.Lock(); defer mailbox.mu.Unlock(); return mailbox.closing })
-	if _, err := r.register(directory); !errors.Is(err, errRegistrationLimit) {
+	if _, err := r.register(); !errors.Is(err, errRegistrationLimit) {
 		t.Fatalf("closing registration released capacity: %v", err)
 	}
 	if _, err := io.WriteString(conn, "def"); err != nil {
@@ -79,7 +83,7 @@ func TestResourceRegistrationClosingRetainsCapacity(t *testing.T) {
 	}
 	resourceReadResponse(t, reader, http.StatusOK)
 	lifecycleCheckDelete(t, <-deleted, registered.ID, false)
-	if _, err := r.register(directory); err != nil {
+	if _, err := r.register(); err != nil {
 		t.Fatalf("finalized registration retained capacity: %v", err)
 	}
 }
@@ -122,10 +126,10 @@ func TestResourceUploadGlobalSaturationAndCancellation(t *testing.T) {
 	r, url, _, _ := lifecycleServer(t, time.Second)
 	r.uploads = newUploadSlots(1)
 	client := lifecycleClient(t)
-	directory := t.TempDir()
-	first := lifecycleRegister(t, client, url, directory)
-	siblingDir := t.TempDir()
-	sibling := lifecycleRegister(t, client, url, siblingDir)
+	first := lifecycleRegister(t, client, url)
+	directory := first.Directory
+	sibling := lifecycleRegister(t, client, url)
+	siblingDir := sibling.Directory
 	conn, _ := lifecycleUpload(t, url, first, directory)
 	// An incomplete rejected body must receive a response without sending its tail.
 	rejected, err := net.DialTimeout("tcp4", strings.TrimPrefix(url, "http://"), time.Second)
@@ -218,9 +222,9 @@ func TestResourceUploadForcedDrainAndShutdownRelease(t *testing.T) {
 			r, url, cancel, done := lifecycleServer(t, 100*time.Millisecond)
 			r.uploads = newUploadSlots(1)
 			client := lifecycleClient(t)
-			directory := t.TempDir()
-			first := lifecycleRegister(t, client, url, directory)
-			sibling := lifecycleRegister(t, client, url, t.TempDir())
+			first := lifecycleRegister(t, client, url)
+			directory := first.Directory
+			sibling := lifecycleRegister(t, client, url)
 			_, _ = lifecycleUpload(t, url, first, directory)
 			if shutdown {
 				cancel()
@@ -236,7 +240,7 @@ func TestResourceUploadForcedDrainAndShutdownRelease(t *testing.T) {
 					t.Fatal("shutdown retained registrations")
 				}
 			} else {
-				lifecycleCheckDelete(t, lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+first.ID), first.ID, true)
+				lifecycleCheckDelete(t, lifecycleRequest(client, http.MethodDelete, url+apiPrefix+"/registrations/"+first.ID), first.ID, true)
 				resourcePost(t, client, url, sibling, 200)
 			}
 			lifecycleWait(t, func() bool { return len(r.uploads.held) == 0 })
@@ -280,8 +284,8 @@ func TestResourceUploadGracefulShutdownRelease(t *testing.T) {
 	r, url, _, _ := lifecycleServer(t, time.Second)
 	r.uploads = newUploadSlots(1)
 	client := lifecycleClient(t)
-	directory := t.TempDir()
-	first := lifecycleRegister(t, client, url, directory)
+	first := lifecycleRegister(t, client, url)
+	directory := first.Directory
 	conn, reader := lifecycleUpload(t, url, first, directory)
 	done := make(chan struct{})
 	go func() { r.shutdown(context.Background()); close(done) }()
@@ -306,9 +310,9 @@ func TestResourceUploadGracefulShutdownRelease(t *testing.T) {
 }
 
 func TestResourceDrainBeforeUploadReleasesCapacity(t *testing.T) {
-	r := newRegistry()
+	r := newRegistry(t.TempDir())
 	defer r.close()
-	mailbox, err := r.register(t.TempDir())
+	mailbox, err := r.register()
 	if err != nil {
 		t.Fatal(err)
 	}

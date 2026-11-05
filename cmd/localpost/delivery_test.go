@@ -284,11 +284,11 @@ func TestMessageProgressExtendsDeadline(t *testing.T) {
 func TestRegisteredMailboxDeliversSeparately(t *testing.T) {
 	registry, url, _, _ := lifecycleServer(t, time.Second)
 	for range 2 {
-		directory := t.TempDir()
-		mailbox, err := registry.register(directory)
+		mailbox, err := registry.register()
 		if err != nil {
 			t.Fatal(err)
 		}
+		directory := mailbox.Directory
 		client := &http.Client{Timeout: 3 * time.Second}
 		response, err := client.Post(url+messagePath(mailbox.ID), "application/octet-stream", strings.NewReader(directory))
 		if err != nil {

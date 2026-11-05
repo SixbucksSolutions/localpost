@@ -33,7 +33,9 @@ func TestQualificationSharedListenerOverlappingShutdown(t *testing.T) {
 		var readers [3]*bufio.Reader
 		var payloads [3][]byte
 		for i := range registered {
-			registered[i] = lifecycleRegister(t, client, url, directories[i])
+			registered[i] = lifecycleRegister(t, client, url)
+			directories[i] = registered[i].Directory
+			retained[i] = map[string][]byte{}
 			if !validRegistrationID(registered[i].ID) {
 				t.Fatalf("cycle %d: invalid registration UUID", cycle)
 			}
@@ -67,7 +69,7 @@ func TestQualificationSharedListenerOverlappingShutdown(t *testing.T) {
 
 		deleted := make(chan lifecycleReply, 1)
 		go func() {
-			deleted <- lifecycleRequest(client, http.MethodDelete, url+"/registrations/"+registered[0].ID)
+			deleted <- lifecycleRequest(client, http.MethodDelete, url+apiPrefix+"/registrations/"+registered[0].ID)
 		}()
 		lifecycleWait(t, func() bool { return sharedQualificationClosing(owners[0]) })
 		if sharedQualificationClosing(owners[1]) || sharedQualificationClosing(owners[2]) {

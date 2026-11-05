@@ -1,6 +1,9 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+	"strings"
+)
 
 // withCORS serves the trusted-localhost policy before application handlers. It
 // passes the original writer through so upload deadlines remain enforceable.
@@ -9,7 +12,15 @@ func withCORS(next http.Handler, methods string) http.Handler {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		w.Header().Set("Access-Control-Allow-Methods", methods)
+		if rejectUnsupportedAPIVersion(w, request) {
+			return
+		}
 		if request.Method == http.MethodOptions {
+			if request.URL.Path != apiPrefix && !strings.HasPrefix(request.URL.Path, apiPrefix+"/") {
+				abortMessageBody(w, http.NewResponseController(w))
+				writeAPIError(w, http.StatusNotFound, "not_found", "404 page not found")
+				return
+			}
 			if request.ContentLength != 0 {
 				// Do not let net/http drain an incomplete preflight body forever.
 				abortMessageBody(w, http.NewResponseController(w))

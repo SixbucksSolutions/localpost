@@ -14,21 +14,21 @@ import (
 	"time"
 )
 
-// A destination reused after DELETE must acquire a new identity. Requests for
-// the old identity, including differently cased spellings, cannot reach it.
+// A registration created after DELETE receives a new identity and directory.
+// Requests for the old identity, including differently cased spellings, cannot reach it.
 func TestRouteQualificationIdentityIsolation(t *testing.T) {
 	server, r := newHTTPEdgeAdmin(t, time.Second)
 	connection := deliveryConnection(t, server)
 	reader := bufio.NewReader(connection)
 	directories := []string{t.TempDir(), t.TempDir()}
 	retained := []map[string][]byte{{}, {}}
-	register := func(directory string) string {
+	register := func(index int) string {
 		t.Helper()
-		payload, err := json.Marshal(map[string]string{"directory": directory})
+		payload, err := json.Marshal(struct{}{})
 		if err != nil {
 			t.Fatal(err)
 		}
-		body := routeQualificationExchange(t, connection, reader, http.MethodPost, "/registrations", "application/json", payload)
+		body := routeQualificationExchange(t, connection, reader, http.MethodPost, apiPrefix+"/registrations", "application/json", payload)
 		var fields map[string]json.RawMessage
 		if err := json.Unmarshal(body, &fields); err != nil {
 			t.Fatal(err)
@@ -37,12 +37,15 @@ func TestRouteQualificationIdentityIsolation(t *testing.T) {
 		if err := json.Unmarshal(fields["id"], &id); err != nil {
 			t.Fatal(err)
 		}
-		if len(fields) != 1 || !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
-			t.Fatalf("registration must contain only a canonical UUIDv4 id: %s", body)
+		if len(fields) != 2 || fields["directory"] == nil || !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+			t.Fatalf("registration must contain a canonical UUIDv4 id and directory: %s", body)
+		}
+		if err := json.Unmarshal(fields["directory"], &directories[index]); err != nil {
+			t.Fatal(err)
 		}
 		return id
 	}
-	first, sibling := register(directories[0]), register(directories[1])
+	first, sibling := register(0), register(1)
 	deliver := func(id string, destination int, media string, payload []byte) {
 		t.Helper()
 		body := routeQualificationExchange(t, connection, reader, http.MethodPost, messagePath(id), media, payload)
@@ -60,7 +63,7 @@ func TestRouteQualificationIdentityIsolation(t *testing.T) {
 	}
 	deliver(strings.ToUpper(first), 0, "application/json", []byte("{invalid JSON\x00\xff"))
 	deliver(sibling, 1, "application/octet-stream", []byte{0, 255, '\r', '\n'})
-	body := routeQualificationExchange(t, connection, reader, http.MethodDelete, "/registrations/"+strings.ToUpper(first), "", nil)
+	body := routeQualificationExchange(t, connection, reader, http.MethodDelete, apiPrefix+"/registrations/"+strings.ToUpper(first), "", nil)
 	var deleted struct {
 		ID           string `json:"id"`
 		Unregistered bool   `json:"unregistered"`
@@ -72,7 +75,9 @@ func TestRouteQualificationIdentityIsolation(t *testing.T) {
 	if deleted.ID != first || !deleted.Unregistered || deleted.Forced {
 		t.Fatalf("DELETE did not return canonical completed identity: %s", body)
 	}
-	replacement := register(directories[0])
+	qualificationFiles(t, directories[0], retained[0])
+	replacement := register(0)
+	retained[0] = map[string][]byte{}
 	if replacement == first || replacement == sibling {
 		t.Fatal("new registration reused an existing or retired identity")
 	}
@@ -90,7 +95,7 @@ func TestRouteQualificationIdentityIsolation(t *testing.T) {
 		for _, method := range []string{http.MethodPost, http.MethodDelete} {
 			t.Run(tc.name+"/"+method, func(t *testing.T) {
 				conn := deliveryConnection(t, server)
-				path := "/registrations/" + tc.id
+				path := apiPrefix + "/registrations/" + tc.id
 				if method == http.MethodPost {
 					path += "/messages"
 				}
@@ -121,11 +126,12 @@ func TestRouteQualificationIdentityIsolation(t *testing.T) {
 func TestRouteQualificationEarlyBodyCleanup(t *testing.T) {
 	server, r := newHTTPEdgeAdmin(t, 2*time.Second)
 	directories := []string{t.TempDir(), t.TempDir()}
-	liveResponse, live := registrationRequest(t, r, directories[0])
-	retiredResponse, retired := registrationRequest(t, r, directories[1])
+	liveResponse, live := registrationRequest(t, r)
+	retiredResponse, retired := registrationRequest(t, r)
 	if liveResponse.Code != http.StatusOK || retiredResponse.Code != http.StatusOK {
 		t.Fatal("unable to establish cleanup test registrations")
 	}
+	directories[0], directories[1] = live.Directory, retired.Directory
 	r.unregister(httptest.NewRecorder(), retired.ID)
 	for _, framing := range []string{"Content-Length: 4096\r\n\r\nx", "Transfer-Encoding: chunked\r\n\r\n1\r\nx\r\n"} {
 		for _, tc := range []struct {
@@ -133,11 +139,11 @@ func TestRouteQualificationEarlyBodyCleanup(t *testing.T) {
 			status                          int
 		}{
 			{"unknown upload", "POST", messagePath("12345678-1234-4234-8234-123456789abc"), "application/json", "registration_not_found", 404},
-			{"malformed delete", "DELETE", "/registrations/not-a-uuid", "application/json", "invalid_registration_id", 400},
+			{"malformed delete", "DELETE", apiPrefix + "/registrations/not-a-uuid", "application/json", "invalid_registration_id", 400},
 			{"retired upload", "POST", messagePath(retired.ID), "application/json", "registration_not_found", 404},
 			{"live wrong method", "PUT", messagePath(live.ID), "application/json", "method_not_allowed", 405},
 			{"live wrong media", "POST", messagePath(live.ID), "text/plain", "unsupported_media_type", 415},
-			{"live preflight", "OPTIONS", "/registrations/" + live.ID, "application/json", "", 204},
+			{"live preflight", "OPTIONS", apiPrefix + "/registrations/" + live.ID, "application/json", "", 204},
 			{"retired preflight", "OPTIONS", messagePath(retired.ID), "application/json", "", 204},
 		} {
 			t.Run(tc.name+"/"+strings.Split(framing, ":")[0], func(t *testing.T) {
@@ -147,7 +153,7 @@ func TestRouteQualificationEarlyBodyCleanup(t *testing.T) {
 				}
 				// If cleanup accidentally dispatches these body bytes, the live
 				// registration disappears and the isolation assertions fail.
-				pipeline := "DELETE /registrations/" + live.ID + " HTTP/1.1\r\nHost: localhost\r\n\r\n"
+				pipeline := "DELETE " + apiPrefix + "/registrations/" + live.ID + " HTTP/1.1\r\nHost: localhost\r\n\r\n"
 				if _, err := fmt.Fprintf(conn, "%s %s HTTP/1.1\r\nHost: localhost\r\nContent-Type: %s\r\nOrigin: https://arbitrary.example\r\n%s%s", tc.method, tc.path, tc.media, framing, pipeline); err != nil {
 					t.Fatal(err)
 				}

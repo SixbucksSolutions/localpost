@@ -67,7 +67,7 @@ func TestRunOccupiedPort(t *testing.T) {
 	}
 	port := address.Port
 	var output bytes.Buffer
-	err := run(context.Background(), config{port: port}, &output)
+	err := run(context.Background(), config{port: port, mailboxRoot: t.TempDir()}, &output)
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1:"+strconv.Itoa(port)) {
 		t.Fatalf("occupied port must identify failed address: %v", err)
 	}
@@ -81,7 +81,7 @@ func TestServeHTTPAndCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- serve(ctx, listener) }()
+	go func() { result <- serve(ctx, listener, t.TempDir()) }()
 
 	client := &http.Client{Timeout: 3 * time.Second, Transport: &http.Transport{Proxy: nil}}
 	defer client.CloseIdleConnections()
@@ -140,7 +140,7 @@ func TestServeAlreadyCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	result := make(chan error, 1)
-	go func() { result <- serve(ctx, listener) }()
+	go func() { result <- serve(ctx, listener, t.TempDir()) }()
 	select {
 	case err := <-result:
 		if err != nil {
