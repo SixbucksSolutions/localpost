@@ -61,10 +61,16 @@ export async function runServiceStopUpload(options) {
   assert.ok((await lstat(installer)).isFile(), 'Installer must be a regular file');
   const serviceName = options['--service-name'];
   const powershell = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+  // A PowerShell 7 parent can export incompatible module paths to Windows PowerShell 5.
+  const shellEnvironment = { ...process.env };
+  for (const key of Object.keys(shellEnvironment)) {
+    if (key.toLowerCase() === 'psmodulepath') delete shellEnvironment[key];
+  }
+  shellEnvironment.PSModulePath = path.join(process.env.SystemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules');
   const powershellArgs = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
   const processInfo = await execute(powershell, [...powershellArgs, '-Command',
     `$ErrorActionPreference='Stop'; $s=Get-CimInstance Win32_Service -Filter "Name='${serviceName}'"; if (!$s -or $s.State -ne 'Running') { throw 'Service is not running' }; $children=@(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($s.ProcessId)" | Where-Object Name -eq 'localpost.exe'); if ($children.Count -ne 1) { throw 'Expected one daemon child' }; @{ wrapperPid=[int]$s.ProcessId; daemonPid=[int]$children[0].ProcessId; executable=$children[0].ExecutablePath } | ConvertTo-Json -Compress`],
-  { timeout: 30000, maxBuffer: 8192, windowsHide: true });
+  { timeout: 30000, maxBuffer: 8192, windowsHide: true, env: shellEnvironment });
   const owner = JSON.parse(processInfo.stdout);
   assert.ok(Number.isInteger(owner.wrapperPid) && owner.wrapperPid > 0);
   assert.ok(Number.isInteger(owner.daemonPid) && owner.daemonPid > 0);
@@ -94,7 +100,7 @@ export async function runServiceStopUpload(options) {
         return info.isFile() && !info.isSymbolicLink() && info.size > 0;
       }, 'No admitted partial upload was observed');
       stopPromise = execute(powershell, [...powershellArgs, '-File', installer, '-Action', 'Stop', '-ServiceName', serviceName, '-InstallRoot', installRoot, '-MailboxRoot', root],
-        { timeout: 70000, maxBuffer: 16384, windowsHide: true });
+        { timeout: 70000, maxBuffer: 16384, windowsHide: true, env: shellEnvironment });
       // Observe failures immediately while the HTTP request remains deliberately incomplete.
       stopPromise.then(() => { stopSettled = true; }, () => { stopSettled = true; });
       await waitFor(async () => {
