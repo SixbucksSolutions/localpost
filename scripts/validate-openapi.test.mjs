@@ -9,7 +9,7 @@ import { createValueValidator, validateDocument } from './validate-openapi.mjs';
 
 const source = JSON.parse(readFileSync(new URL('../openapi.json', import.meta.url), 'utf8'));
 const copy = () => structuredClone(source);
-const registrationMedia = document => document.paths['/registrations'].post.requestBody.content['application/json'];
+const registrationMedia = document => document.paths['/api/2026-11-05/registrations'].post.requestBody.content['application/json'];
 
 test('vendored schema and license bytes match recorded provenance', () => {
   const sources = JSON.parse(readFileSync(new URL('./openapi-schemas/sources.json', import.meta.url), 'utf8'));
@@ -22,10 +22,11 @@ test('vendored schema and license bytes match recorded provenance', () => {
 
 test('canonical OpenAPI 3.2.1 contract, refs and modeled examples pass', () => {
   assert.equal(source.openapi, '3.2.1');
-  assert.deepEqual(validateDocument(source), { references: 89, examples: 9 });
+  assert.deepEqual(validateDocument(source), { references: 96, examples: 10 });
+  assert.equal(source.info.version, '0.2.0');
   const validate = createValueValidator(source);
-  validate('#/components/schemas/RegistrationRequest', { directory: '/tmp/example' });
-  assert.throws(() => validate('#/components/schemas/RegistrationRequest', { directory: '' }), /minLength|fewer than/);
+  validate('#/components/schemas/RegistrationRequest', {});
+  assert.throws(() => validate('#/components/schemas/RegistrationRequest', { directory: '' }), /additional properties|maxProperties/);
   assert.throws(() => validate('#/components/schemas/RegistrationRequest', { directory: '/tmp', extra: 1 }), /additional properties/);
   assert.throws(() => validate('#/components/schemas/RegistrationId', 'not-a-uuid'), /pattern|uuid/);
 });
@@ -111,21 +112,21 @@ test('schemas without examples are compiled and false schemas reject values', ()
 
 test('rejects invalid media and nested schema examples', () => {
   const document = copy();
-  registrationMedia(document).examples.windows.value.directory = 123;
+  registrationMedia(document).examples.empty.value.directory = 123;
   assert.throws(() => validateDocument(document), /Invalid example/);
   const nested = copy();
-  nested.components.schemas.RegistrationRequest.properties.directory.examples = [''];
+  nested.components.schemas.DestinationDirectory.examples = ['relative/path'];
   assert.throws(() => validateDocument(nested), /Invalid example/);
 });
 
 test('OpenAPI 3.2 dataValue examples are checked, including referenced examples', () => {
   const document = copy();
-  registrationMedia(document).examples.windows = { dataValue: { directory: '/tmp/example' } };
-  assert.equal(validateDocument(document).examples, 9);
-  registrationMedia(document).examples.windows.dataValue.directory = 123;
+  registrationMedia(document).examples.empty = { dataValue: {} };
+  assert.equal(validateDocument(document).examples, validateDocument(source).examples);
+  registrationMedia(document).examples.empty.dataValue.directory = 123;
   assert.throws(() => validateDocument(document), /Invalid example/);
   document.components.examples = { InvalidDirectory: { dataValue: { directory: 123 } } };
-  registrationMedia(document).examples.windows = { $ref: '#/components/examples/InvalidDirectory' };
+  registrationMedia(document).examples.empty = { $ref: '#/components/examples/InvalidDirectory' };
   assert.throws(() => validateDocument(document), /Invalid example/);
 });
 
@@ -159,7 +160,7 @@ test('application-schema dynamic refs fail explicitly without changing semantics
 test('example JSON and opaque upload annotations remain opaque', () => {
   const document = copy();
   document.components.schemas.Arbitrary = { type: 'object', examples: [{ $ref: 'not-a-schema-ref' }] };
-  const content = document.paths['/registrations/{id}/messages'].post.requestBody.content;
+  const content = document.paths['/api/2026-11-05/registrations/{id}/messages'].post.requestBody.content;
   for (const media of Object.values(content)) {
     assert.equal(media.schema, undefined);
     media.example = 'opaque bytes, not JSON: {';
@@ -169,18 +170,18 @@ test('example JSON and opaque upload annotations remain opaque', () => {
 
 test('rejects duplicate operation IDs, parameter identities and templated paths', () => {
   const duplicate = copy();
-  duplicate.paths['/registrations'].options.operationId = 'registerMailbox';
+  duplicate.paths['/api/2026-11-05/registrations'].options.operationId = 'registerMailbox';
   assert.throws(() => validateDocument(duplicate), /Duplicate operationId/);
   const parameter = copy();
-  parameter.paths['/registrations/{id}'].parameters.push({ $ref: '#/components/parameters/RegistrationId' });
+  parameter.paths['/api/2026-11-05/registrations/{id}'].parameters.push({ $ref: '#/components/parameters/RegistrationId' });
   assert.throws(() => validateDocument(parameter), /Duplicate parameter/);
   const path = copy();
-  path.paths['/registrations/{other}'] = {};
+  path.paths['/api/2026-11-05/registrations/{other}'] = {};
   assert.throws(() => validateDocument(path), /Duplicate templated path/);
 });
 
 test('rejects missing path parameter declarations', () => {
   const document = copy();
-  document.paths['/registrations/{id}'].parameters = [];
+  document.paths['/api/2026-11-05/registrations/{id}'].parameters = [];
   assert.throws(() => validateDocument(document), /Missing path parameter/);
 });

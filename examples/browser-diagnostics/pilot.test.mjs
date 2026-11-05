@@ -6,8 +6,8 @@ const runId = "22222222-2222-4222-8222-222222222222";
 const config = { enabled: true, base: "http://127.0.0.1:53147", registrationId: runId };
 
 test("only loopback HTTP roots and UUIDv4 registrations are accepted", () => {
-  assert.equal(endpoint(config.base, runId), `${config.base}/registrations/${runId}/messages`);
-  assert.equal(endpoint("http://[::1]:53147/", runId), `http://[::1]:53147/registrations/${runId}/messages`);
+  assert.equal(endpoint(config.base, runId), `${config.base}/api/2026-11-05/registrations/${runId}/messages`);
+  assert.equal(endpoint("http://[::1]:53147/", runId), `http://[::1]:53147/api/2026-11-05/registrations/${runId}/messages`);
   for (const base of ["https://127.0.0.1", "http://example.org", "http://localhost", "http://127.0.0.1/path", "http://user@127.0.0.1", "http://127.0.0.1/?x=1", "http://127.0.0.1/#x"]) {
     assert.throws(() => endpoint(base, runId));
   }

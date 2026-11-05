@@ -4,22 +4,23 @@ This development-only example serves a synthetic **Add one** counter. It uses
 the existing localpost daemon to deliver bounded JSON diagnostics. It contains
 no collector, file writer, daemon launcher, dependency install, or background
 watcher. The checked-in example and unit tests alone do not establish a browser
-proof; the completed M04.02 run is summarized below.
+proof. Use the bounded headless check below for the current contract.
 
 ## Prepare and run
 
 The operator starts localpost separately (see the root README). If it is
 unavailable, report that condition; do not launch a replacement collector.
-From the repository root, create a fresh private inbox **outside this repository**
-and register it. These commands use a per-run temporary directory; select a more
-restricted private location if the local environment requires it.
+The daemon must be version 0.2.0 or later with the accepted date-versioned
+contract. Its operator provisions a private mailbox root with `--mailbox-root`.
+From the repository root, ask the service to create a fresh private inbox.
+The returned directory is service-side and must be readable by this agent.
 
 ```powershell
 $daemon = 'http://127.0.0.1:53147'
-$inbox = Join-Path $env:TEMP ('localpost-browser-' + [guid]::NewGuid().ToString())
-New-Item -ItemType Directory -Path $inbox | Out-Null
-$registration = Invoke-RestMethod -Method Post -Uri "$daemon/registrations" `
-    -ContentType application/json -Body (@{ directory = $inbox } | ConvertTo-Json -Compress)
+$api = "$daemon/api/2026-11-05"
+$registration = Invoke-RestMethod -Method Post -Uri "$api/registrations" `
+    -ContentType application/json -Body '{}'
+$inbox = $registration.directory
 $registration.id
 go run ./examples/browser-diagnostics
 ```
@@ -79,7 +80,7 @@ does not validate this application schema.
 When finished, disable logging, stop the pilot, then retire only this mailbox:
 
 ```powershell
-Invoke-RestMethod -Method Delete -Uri "$daemon/registrations/$($registration.id)"
+Invoke-RestMethod -Method Delete -Uri "$api/registrations/$($registration.id)"
 ```
 
 Unregistration preserves delivered files. Retain or remove the private inbox
@@ -101,12 +102,40 @@ node --test examples/browser-diagnostics/pilot.test.mjs
 go test ./examples/browser-diagnostics
 ```
 
-Node uses built-in modules only; the repository check pins the supported version.
+The pilot unit tests use built-in Node modules; the repository check pins the supported version.
 Tests cover schema/config bounds, exact body projection, the wrong delta,
 transport isolation, timeout abort, one-send behavior, run limits, stale results,
-and the static server allowlist. They do not exercise a real browser.
+and the static server allowlist. The check below supplies real-browser coverage.
 
-## Verified browser workflow
+## Bounded current-contract browser proof
+
+Build the pilot, start it on an available loopback port, and run this check with
+Node 26.13.0 and installed Chrome. Supply the daemon's actual private mailbox
+root and a new private evidence directory outside this repository.
+
+```powershell
+npm ci --ignore-scripts --no-audit --no-fund
+go build -o "$env:TEMP/localpost-browser-pilot.exe" ./examples/browser-diagnostics
+# Start the pilot separately, then run against the intended daemon.
+node examples/browser-diagnostics/browser-check.mjs `
+    --service-url http://127.0.0.1:53147 --pilot-url http://127.0.0.1:53148 `
+    --mailbox-root C:\ProgramData\localpost\mailboxes `
+    --evidence-directory "$env:TEMP/localpost-browser-evidence-unique" `
+    --chrome "C:\Program Files\Google\Chrome\Application\chrome.exe"
+```
+
+The check uses the pinned project validation dependencies and a fresh headless Chrome profile. It
+validates the registration response against the supplied canonical root, drives
+two counter actions, observes browser CORS preflight and upload responses, and
+compares each request body byte-for-byte with its final delivery file. It then
+retires its registration and checks that a third action advances once while
+returning `http_error`, with no additional file. Each wait and file read is
+bounded. Browser logs and payloads stay in the private evidence directory.
+It closes its browser and retires its own registration even on failure. It
+preserves mailbox files for review and leaves the daemon and pilot running.
+No browser security or CSP bypass flags are used.
+
+## Historical 0.1.0 browser workflow
 
 On 2026-11-04, the pilot completed a real-browser run using installed Chrome
 156.0.8078.80 on Windows, in headless mode through Playwright Core 1.64.1.

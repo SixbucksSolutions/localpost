@@ -6,13 +6,14 @@ A localhost post office for agents.
 [Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_windows_amd64.zip) ·
 [Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_amd64.tar.gz) ·
 [Linux ARM64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_arm64.tar.gz) ·
-[Docker](docs/containers.md) ·
+[v0.1.0 Docker guide](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/docs/containers.md) ·
 [SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/SHA256SUMS)
 
-**API reference: [OpenAPI 3.2.1 contract](openapi.json).**
+**Development API:** [v0.2.0 OpenAPI contract](openapi.json), pending release.
+The published v0.1.0 release uses its [immutable API contract](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/openapi.json).
 
 localpost is one shared service that receives HTTP POST bodies and delivers them
-unchanged as files in an agent-selected directory. An agent registers a mailbox,
+unchanged as files in a service-created directory. An agent registers a mailbox,
 gets a UUIDv4 identity on the shared listener, and reads the resulting files with
 its normal filesystem tools.
 
@@ -29,8 +30,8 @@ localpost is free and open-source software under the MIT license, provided as is
 without warranty. These good-faith tests carry no support commitment.
 [GitHub issues](https://github.com/SixbucksSolutions/localpost/issues) are welcome,
 with no guarantee of a response or fix.
-The M03 API uses one listener and UUIDv4-addressed registrations; the old
-per-registration ports are removed.
+The development v0.2.0 API uses dated routes and service-created mailboxes.
+It is pending release and is incompatible with the published v0.1.0 API.
 
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
@@ -48,23 +49,22 @@ understand them.
 
 ## Intended workflow
 
-1. A person starts localpost as an ordinary user.
-2. An agent creates its destination directory and ensures localpost can write to it.
-3. The agent registers that directory through the admin API.
-4. localpost returns a UUIDv4 registration ID in a `200` response.
-5. A sender posts a message to that registration's route. localpost publishes one complete file:
-   `localpost_[UUIDv7].dat`.
-6. The agent reads the file. It unregisters the mailbox when finished.
+1. An operator provisions an existing absolute mailbox root and starts localpost with `--mailbox-root`.
+2. An agent sends `{}` to the dated registration route.
+3. localpost creates a UUIDv4-named child and returns its ID and absolute directory.
+4. A sender posts to that ID. Each complete message becomes `localpost_[UUIDv7].dat`.
+5. The agent reads the files, retires its registration, and cleans up its directory.
 
 If localpost is unavailable, the agent tells the person running it. Agents do
 not start a replacement daemon or fall back to project-local collectors.
 
 ## Container deployment
 
-The public image `ghcr.io/sixbuckssolutions/localpost:0.1.0` provides Linux AMD64
+The published v0.1.0 image `ghcr.io/sixbuckssolutions/localpost:0.1.0` provides Linux AMD64
 and ARM64 deployments. It uses the tested release binaries in a minimal scratch
-image. See the [container guide](docs/containers.md) for host networking,
-persistent inbox mounts, permissions, digests and operating instructions.
+image. See the [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/6889c8c/docs/containers.md)
+for its host networking, mounts, permissions, digest and operating instructions.
+The [development container guide](docs/containers.md) describes v0.2.0.
 ## Build and run the foundation
 
 Development uses Go **1.27.3**, recorded in `.go-version`, and golangci-lint
@@ -146,7 +146,7 @@ To also check an already-running localpost service with temporary, isolated
 registrations and files:
 
 ```powershell
-./scripts/check.ps1 -ServiceUrl http://127.0.0.1:53147
+./scripts/check.ps1 -ServiceUrl http://127.0.0.1:53147 -MailboxRoot C:\localpost\mailboxes
 ```
 
 This leaves the shared daemon running. CI runs the same service check against
@@ -158,15 +158,18 @@ these README examples explain its use rather than defining a second contract.
 The operator can start localpost with:
 
 ```powershell
-./bin/localpost.exe                 # Shared API at http://127.0.0.1:53147
-./bin/localpost.exe --port 53148    # Override the shared port
+./bin/localpost.exe --mailbox-root C:\localpost\mailboxes
+./bin/localpost.exe --mailbox-root C:\localpost\mailboxes --port 53148
 ```
 
 Stop it with Ctrl+C. Shutdown stops new work, allows a shared grace period of up
 to 30 seconds, then interrupts unfinished requests. The startup message confirms
 the bound address. Control and message routes use this same listener.
 
-There is no configuration file. The shared listener uses an unprivileged TCP
+The root must already exist and be an absolute directory accessible to the service.
+There is no implicit daemon root. `--help` and `--version` need no root.
+The Windows installer is planned to provision `C:\ProgramData\localpost\mailboxes`
+and pass it explicitly. The shared listener uses an unprivileged TCP
 port on `127.0.0.1`. An occupied port causes startup to fail clearly; localpost
 does not silently choose another port.
 
@@ -181,7 +184,7 @@ From a clean checkout, build the versioned candidates into a new or empty direct
 
 ```powershell
 $candidateDir = Join-Path $env:TEMP ('localpost-candidate-' + [guid]::NewGuid())
-go run ./tools/release --version 0.1.0 --output $candidateDir
+go run ./tools/release --version 0.2.0 --output $candidateDir
 ```
 
 Preserve published artifact bytes. A fresh local build does not replace a
@@ -220,10 +223,9 @@ checks run in native-architecture containers on Ubuntu 26.04, sharing the host
 kernel and a bind-mounted filesystem. Evidence records the actual OS, kernel,
 filesystem and image digest. This scope covers Alpine userspace compatibility.
 
-Both waves download and verify their published v0.1.0 archives. The original
-ARM64 qualification built a reproducible test package twice from the original
-v0.1.0 source using `--source-ref v0.1.0 --targets linux/arm64`,
-`CGO_ENABLED=0` and `GOARM64=v8.0`. That exact package is now published.
+Both waves use the frozen `release/0.2.0-candidate.json` artifact identity.
+They verify the candidate artifacts before publication or the matching public
+assets after publication.
 
 Both waves check package identity, ordinary-user startup with an empty `PATH`,
 default and overridden ports, occupied-port rejection, API/CORS behavior,
@@ -240,32 +242,25 @@ before the test matrix and Linux ARM64 release asset were added.
 
 ## Registration API
 
-The control API uses JSON for requests, success responses, and application errors.
-Register an existing absolute directory with `POST /registrations` on the shared
-port. The caller creates the directory and arranges its permissions:
+The development control API uses JSON for requests, success responses, and
+application errors. Register with an empty object on the dated route.
 
 ```powershell
-$inbox = Join-Path $env:TEMP 'localpost-inbox'
-New-Item -ItemType Directory -Force -Path $inbox | Out-Null
-$body = @{ directory = $inbox } | ConvertTo-Json
-$registration = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:53147/registrations `
-    -ContentType application/json -Body $body
+$base = 'http://127.0.0.1:53147/api/2026-11-05'
+$registration = Invoke-RestMethod -Method Post -Uri "$base/registrations" `
+    -ContentType application/json -Body '{}'
+$inbox = $registration.directory
 ```
 
-A successful registration returns HTTP `200` with the assigned UUIDv4 identity:
+A successful response contains `id` and `directory`. The ID is a UUIDv4 and
+is the basename of the absolute directory created beneath the configured root.
+There is no registration-specific port or process ID. Registrations disappear
+on restart, while directories and files remain.
 
-```json
-{"id":"4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"}
-```
-
-There is no registration-specific port. The ID identifies a logical mailbox,
-not an authentication credential. Multiple registrations remain independent,
-and all are forgotten when the daemon exits. Existing files are unchanged.
-
-localpost checks writability with a temporary probe file, which it closes and
-removes before accepting the directory. It does not create directories or change
-their permissions. A successful probe is not a guarantee that later writes will
-succeed.
+On POSIX, mailbox directories use `0700` and files use `0600`. Run the service
+and consuming agent under the same UID. On Windows, new directories and files
+inherit the root's ACL. The operator must grant the service and agent the access
+they need. A successful startup probe does not guarantee later writes.
 
 Registration requests accept one JSON object, at most 64 KiB, with media-type
 parameters such as `charset=utf-8` permitted. Control-request reads have a
@@ -275,16 +270,17 @@ Application errors return an `error` object containing a stable `code` and a
 readable `message`, for example:
 
 ```json
-{"error":{"code":"invalid_directory","message":"directory must exist and be accessible"}}
+{"error":{"code":"invalid_request","message":"invalid request"}}
 ```
 
 | HTTP status | Error code |
 | --- | --- |
-| `400` | `invalid_request`, `invalid_directory`, or `invalid_registration_id` |
-| `404` | `not_found` or `registration_not_found` |
+| `400` | `invalid_request` or `invalid_registration_id` |
+| `404` | `not_found`, `registration_not_found`, or `unsupported_api_version` |
 | `405` | `method_not_allowed` (with `Allow: POST`) |
 | `413` | `request_too_large` |
 | `415` | `unsupported_media_type` |
+| `500` | `mailbox_allocation_failed` |
 | `503` | `unavailable` or `registration_limit` |
 
 A lost response does not undo an established registration. Control requests
@@ -293,11 +289,11 @@ Browser callers use the permissive CORS policy described below.
 
 ## Unregistration API
 
-Use `DELETE /registrations/{id}` to retire one mailbox:
+Use `DELETE /api/2026-11-05/registrations/{id}` to retire one mailbox:
 
 ```powershell
 Invoke-RestMethod -Method Delete `
-    -Uri "http://127.0.0.1:53147/registrations/$($registration.id)"
+    -Uri "http://127.0.0.1:53147/api/2026-11-05/registrations/$($registration.id)"
 ```
 
 Successful completion returns JSON:
@@ -325,7 +321,7 @@ when the process exits.
 
 ## Message API
 
-Send a message with `POST /registrations/{id}/messages` on the shared port. Use
+Send a message with `POST /api/2026-11-05/registrations/{id}/messages` on the shared port. Use
 `application/octet-stream` or `application/json`; media-type parameters are
 accepted. Both bodies are opaque bytes, so JSON-labelled content is not parsed
 or repaired. HTTP transfer framing is removed by the HTTP server; content
@@ -335,7 +331,7 @@ For example, after registering an inbox:
 
 ```powershell
 $delivery = Invoke-RestMethod -Method Post `
-    -Uri "http://127.0.0.1:53147/registrations/$($registration.id)/messages" `
+    -Uri "http://127.0.0.1:53147/api/2026-11-05/registrations/$($registration.id)/messages" `
     -ContentType application/json -Body '{"event":"test"}'
 Get-Content -LiteralPath (Join-Path $inbox $delivery.filename) -Raw
 ```
@@ -376,13 +372,15 @@ remains the agent's responsibility. No extra runtime configuration is required.
 Control and message responses, including application errors, send
 `Access-Control-Allow-Origin: *`. The shared listener allows the `Content-Type`
 request header and advertises `POST, DELETE, OPTIONS`. No credentials, tokens, or origin registration are
-needed. `OPTIONS` preflights return `204` without creating a registration or file.
+needed. Supported-prefix `OPTIONS` preflights return `204` without creating a
+registration or file. Unsupported-version preflights return `404` with
+`unsupported_api_version`. Other unknown paths return `404 not_found`.
 
-After the agent prepares a directory and supplies its registration ID,
+After the agent registers a mailbox and supplies its registration ID,
 browser JavaScript can send a JSON diagnostic and read the JSON receipt:
 
 ```javascript
-const response = await fetch(`http://127.0.0.1:53147/registrations/${registrationId}/messages`, {
+const response = await fetch(`http://127.0.0.1:53147/api/2026-11-05/registrations/${registrationId}/messages`, {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   credentials: "omit",
@@ -429,23 +427,34 @@ notifications are hints; agents should also reconcile directory contents.
 
 - **localpost:** register and close mailboxes, receive bounded HTTP bodies, and
   publish complete files without changing the payload.
-- **Agent:** prepare the directory and permissions; discover, interpret, retain,
-  and remove delivered files; report an unavailable daemon.
+- **Agent:** discover, interpret, retain, and remove its delivered files and
+  mailbox directory after retiring the registration. Report an unavailable daemon.
 - **Sender/application:** choose useful content and remove sensitive information
   before sending it. Browser instrumentation stays in the application.
-- **Person running localpost:** start and stop the shared service.
+- **Person running localpost:** provision the root and its permissions, then start
+  and stop the shared service.
 
 Unregistering stops new uploads, lets accepted uploads finish within the timeout,
 and removes that logical mailbox. Delivered files remain in place. localpost
-never creates or repairs the destination directory and never deletes deliveries.
+creates each destination directory and never deletes deliveries or mailbox directories.
 
-## Migrating from the per-port prototype
+## Migrating from v0.1.0
 
-Restart localpost and register again to obtain UUIDv4 IDs. Registrations were
-already ephemeral, so no registration-state migration is needed. Change senders
-to use the shared port and ID-bearing message path; the registration response no
-longer contains `port`. The old bare `/messages` route is not a compatibility API.
-Previously delivered UUIDv7 files remain unchanged.
+The v0.2.0 contract is pending release. The published v0.1.0 binaries continue
+to use their original unversioned routes and caller-created directories.
+
+- Provision an existing absolute root and pass `--mailbox-root` at startup.
+- Send `{}` when registering. Do not send `directory` or a process ID.
+- Read both `id` and the service-created absolute `directory` from the response.
+- Prefix registration, message and deletion routes with `/api/2026-11-05`.
+  Retired unversioned routes and unsupported API dates return `404` with
+  `unsupported_api_version` and name the supported prefix. There is no latest alias.
+- Re-register after restart. Old IDs do not survive. Retire a registration before
+  removing its directory. Deletion and restart preserve directories and files.
+  Account for orphaned directories after lost responses and manage retention.
+
+The planned rollout includes migration notices to FGA Dev M08, localswim V2 Dev
+M07 and Drive Stats Dev. Release and deployment remain subject to qualification.
 
 ## Project documents
 

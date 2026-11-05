@@ -1,104 +1,67 @@
 # Container deployment
 
-The public image is `ghcr.io/sixbuckssolutions/localpost`, with `0.1.0` and
-`latest` tags for Linux AMD64 and ARM64. Pulls work without signing in. Use the
-version tag for a stable release or pin the multi-architecture index digest.
-
-```sh
-docker pull ghcr.io/sixbuckssolutions/localpost@sha256:b1df918f00f3da9298a51ba148edb9dbdb9f438b2052651e6fcd7c18f147fab4
-```
-
-The image uses `scratch` and the exact published v0.1.0 Linux release binaries.
-Its default user is `65532:65532`, its entrypoint is `/localpost`, and its stop
-signal is `SIGINT`.
+The v0.2.0 container workflow below is in development and pending release and
+qualification. The published v0.1.0 image and its tested digest remain available.
+See the [v0.1.0 container guide](https://github.com/SixbucksSolutions/localpost/blob/v0.1.0/docs/containers.md)
+for that release's unversioned API and recorded test matrix.
 
 ## Linux host
 
-The service listens on loopback. Linux Docker host networking lets host clients
-reach `127.0.0.1:53147`. Bridge networking with a published port cannot reach
-this loopback listener. Use a trusted host because the API has no authentication
-and allows all origins. See [Docker host networking](https://docs.docker.com/engine/network/drivers/host/).
+The daemon listens on loopback. Linux Docker host networking lets host clients
+reach `127.0.0.1:53147`. Use a trusted host because the API has no authentication
+and allows all origins. The filesystem must support hard links.
 
-Create a stable private inbox parent before starting the shared service. Mount it
-at the same absolute path inside the container so agents can register paths they
-also read on the host. Run as the host user's numeric UID and GID so that user
-can create inboxes and read deliveries. The filesystem must support hard links.
-This example uses a Linux shell and assumes `curl` and `jq` are installed.
+Provision an existing absolute mailbox root with private permissions. Mount it
+at the same absolute path in the container and on the host. Run the daemon under
+the consuming agent's UID and GID. Mailbox directories use `0700` and files use
+`0600`. The root is supplied explicitly and has no implicit daemon default.
+
+The example expects a locally built and qualified v0.2.0 image tagged
+`localpost:0.2.0`. It does not imply a published image.
 
 ```sh
 umask 077
-inbox_parent="$HOME/.local/share/localpost/inboxes"
-mkdir -p "$inbox_parent"
-chmod 700 "$inbox_parent"
-docker pull ghcr.io/sixbuckssolutions/localpost:0.1.0
+mailbox_root="$HOME/.local/share/localpost/mailboxes"
+mkdir -p "$mailbox_root"
+chmod 700 "$mailbox_root"
 docker run -d --name localpost --network host --read-only --stop-timeout 40 \
   --user "$(id -u):$(id -g)" \
-  --mount "type=bind,src=$inbox_parent,dst=$inbox_parent" \
-  ghcr.io/sixbuckssolutions/localpost:0.1.0
+  --mount "type=bind,src=$mailbox_root,dst=$mailbox_root" \
+  localpost:0.2.0 --mailbox-root "$mailbox_root"
 ```
 
-Use a parent path without commas because Docker's `--mount` syntax uses commas
-as separators. Keep this shared service running across agent runs. Each agent
-creates its own private directory under the mounted parent and registers that
-absolute path. A delivered file remains on the host after the container stops.
-See [Docker bind mounts](https://docs.docker.com/engine/storage/bind-mounts/).
+Use a path without commas because Docker's `--mount` syntax uses commas as
+separators. Keep the shared service running across agent runs. The service
+creates a new UUIDv4-named child for each registration.
 
 ```sh
-inbox=$(mktemp -d "$inbox_parent/run.XXXXXXXX")
-registration=$(jq -n --arg directory "$inbox" '{directory: $directory}' |
-  curl --fail-with-body -sS -H 'Content-Type: application/json' \
-    --data-binary @- http://127.0.0.1:53147/registrations)
+base=http://127.0.0.1:53147/api/2026-11-05
+registration=$(curl --fail-with-body -sS -H 'Content-Type: application/json' \
+  --data-binary '{}' "$base/registrations")
 id=$(printf '%s' "$registration" | jq -r '.id')
+inbox=$(printf '%s' "$registration" | jq -r '.directory')
 curl --fail-with-body -sS -H 'Content-Type: application/json' \
-  --data-binary '{"event":"example"}' \
-  "http://127.0.0.1:53147/registrations/$id/messages"
+  --data-binary '{"event":"example"}' "$base/registrations/$id/messages"
 ls -l "$inbox"/localpost_*.dat
-curl --fail-with-body -sS -X DELETE "http://127.0.0.1:53147/registrations/$id"
+curl --fail-with-body -sS -X DELETE "$base/registrations/$id"
 ```
 
-Inspect and remove only the files and run directory owned by that agent when
-finished. Retiring a registration leaves deliveries in place. Registrations are
-in memory and must be created again after the daemon restarts. Do not restart the
-shared service for each run or remove other agents' inboxes.
+Inspect and remove only the files and directory owned by the agent after
+retiring its registration. Delete and restart preserve directories and files.
+Registrations are in memory and must be created again after restart. Lost
+registration responses can leave orphaned directories that need retention and
+cleanup. Do not restart the shared service for each run.
 
-To use a different port, start the service with arguments after the image name.
-The following is an alternative to the first `docker run`, using a different
-container name and port.
-
-```sh
-docker run -d --name localpost-custom --network host --read-only --stop-timeout 40 \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=bind,src=$inbox_parent,dst=$inbox_parent" \
-  ghcr.io/sixbuckssolutions/localpost:0.1.0 --port 53148
-```
-
-Use `http://127.0.0.1:53148` for that instance's API requests. Stop an owned
-instance with `docker stop localpost` or `docker stop localpost-custom` as
-appropriate. The 40-second Docker timeout allows for localpost's 30-second
-network grace period. Filesystem operations may take longer. See
-[Docker stop](https://docs.docker.com/reference/cli/docker/container/stop/).
+Pass `--port 53148` after `--mailbox-root` to choose another port. Docker's
+40-second stop timeout allows for localpost's 30-second network grace period.
+Filesystem operations can take longer. See [Docker host networking](https://docs.docker.com/engine/network/drivers/host/)
+and [bind mounts](https://docs.docker.com/engine/storage/bind-mounts/).
 
 ## Docker Desktop
 
-Docker Desktop 4.34 and later offers host networking as an opt-in feature. Its
-behavior, path sharing, permissions and this image need separate verification on
-Windows and macOS. Translate shared Windows paths to absolute Linux paths visible
-inside the container before registering them. The existing v0.1.0 platform test
-matrix records archive and Linux Docker testing. Docker Desktop verification
-remains outside the recorded results.
-See [Docker host networking](https://docs.docker.com/engine/network/drivers/host/).
+Docker Desktop host networking, path sharing and permissions need separate
+verification on Windows and macOS. The returned directory must be accessible at
+the same absolute path to the host agent. Do not infer this from Linux testing.
 
-localpost is MIT-licensed and provided as is without warranty. There is no support
-commitment or guarantee of a response or fix for an issue.
-
-## Image verification
-
-Both architectures were built and tested on native Ubuntu 26.04.1 hosts with
-Docker Engine 29.4.2 and ext4 inbox mounts. The checks cover the exact embedded
-binary and licenses, default nonroot ownership, read-only root filesystem,
-default and custom ports, API/CORS behavior, byte-exact host-visible files,
-disconnect cleanup and an admitted upload completing during `docker stop`.
-Anonymous pulls received the same tested image identities and passed the full
-container checks again. The [native and anonymous-pull jobs](https://github.com/SixbucksSolutions/localpost/actions/runs/42034182097)
-retain the image and verification evidence. The [promotion run](https://github.com/SixbucksSolutions/localpost/actions/runs/42035184223)
-applied that verified index to `latest` using the retained results.
+localpost is MIT-licensed and provided as is without warranty. The recorded test
+matrix is evidence of the environments tested and carries no support commitment.

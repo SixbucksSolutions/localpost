@@ -17,12 +17,12 @@ import (
 func TestArchivesDeterministicAndNormalized(t *testing.T) {
 	entries := []entry{{"README.md", []byte("read me"), 0644}, {"localpost", []byte("dummy binary"), 0755}, {"licenses/go/LICENSE", []byte("license"), 0644}}
 	for _, windows := range []bool{true, false} {
-		first, err := archiveBytes("localpost_0.1.0_test_amd64", entries, windows)
+		first, err := archiveBytes("localpost_0.2.0_test_amd64", entries, windows)
 		if err != nil {
 			t.Fatal(err)
 		}
 		reversed := []entry{entries[2], entries[1], entries[0]}
-		second, err := archiveBytes("localpost_0.1.0_test_amd64", reversed, windows)
+		second, err := archiveBytes("localpost_0.2.0_test_amd64", reversed, windows)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +48,7 @@ func TestArchivesDeterministicAndNormalized(t *testing.T) {
 				if err = errors.Join(dataErr, closeErr); err != nil {
 					t.Fatal(err)
 				}
-				got = append(got, entry{strings.TrimPrefix(file.Name, "localpost_0.1.0_test_amd64/"), data, int64(file.Mode().Perm())})
+				got = append(got, entry{strings.TrimPrefix(file.Name, "localpost_0.2.0_test_amd64/"), data, int64(file.Mode().Perm())})
 			}
 		} else {
 			reader, readErr := gzip.NewReader(bytes.NewReader(first))
@@ -74,7 +74,7 @@ func TestArchivesDeterministicAndNormalized(t *testing.T) {
 				if dataErr != nil {
 					t.Fatal(dataErr)
 				}
-				got = append(got, entry{strings.TrimPrefix(header.Name, "localpost_0.1.0_test_amd64/"), data, header.Mode})
+				got = append(got, entry{strings.TrimPrefix(header.Name, "localpost_0.2.0_test_amd64/"), data, header.Mode})
 			}
 			if err = reader.Close(); err != nil {
 				t.Fatal(err)
@@ -93,13 +93,13 @@ func TestPreflight(t *testing.T) {
 		commandErr                    bool
 		wantError                     bool
 	}{
-		{name: "clean", version: "0.1.0", commit: strings.Repeat("a", 40)},
+		{name: "clean", version: "0.2.0", commit: strings.Repeat("a", 40)},
 		{name: "unsafe", version: "../../bad", wantError: true},
 		{name: "leading zero", version: "01.1.0", wantError: true},
-		{name: "dirty", version: "0.1.0", status: " M file", wantError: true},
-		{name: "untracked", version: "0.1.0", status: "?? file", wantError: true},
-		{name: "unidentified", version: "0.1.0", commit: "abc", wantError: true},
-		{name: "git failure", version: "0.1.0", commandErr: true, wantError: true},
+		{name: "dirty", version: "0.2.0", status: " M file", wantError: true},
+		{name: "untracked", version: "0.2.0", status: "?? file", wantError: true},
+		{name: "unidentified", version: "0.2.0", commit: "abc", wantError: true},
+		{name: "git failure", version: "0.2.0", commandErr: true, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			run := func(_ string, _ []string, name string, args ...string) ([]byte, error) {
@@ -270,7 +270,7 @@ func TestActualGitArchiveExtraction(t *testing.T) {
 }
 
 func TestReleaseTargets(t *testing.T) {
-	for _, value := range []string{"windows/amd64,linux/amd64", "linux/arm64"} {
+	for _, value := range []string{"windows/amd64,linux/amd64,linux/arm64", "linux/arm64"} {
 		got, err := parseTargets(value)
 		if err != nil || strings.Join(got, ",") != value {
 			t.Fatalf("targets %q: %v, %v", value, got, err)
@@ -301,13 +301,13 @@ func TestARM64BuildEnvironment(t *testing.T) {
 func TestResolveSource(t *testing.T) {
 	commit := strings.Repeat("b", 40)
 	run := func(_ string, _ []string, name string, args ...string) ([]byte, error) {
-		want := []string{"-c", "safe.directory=checkout", "rev-parse", "--verify", "--end-of-options", "v0.1.0^{commit}"}
+		want := []string{"-c", "safe.directory=checkout", "rev-parse", "--verify", "--end-of-options", "v0.2.0^{commit}"}
 		if name != "git" || !reflect.DeepEqual(args, want) {
 			t.Fatalf("unexpected source resolution %s %v", name, args)
 		}
 		return []byte(commit + "\n"), nil
 	}
-	got, err := resolveSource(run, "checkout", "v0.1.0")
+	got, err := resolveSource(run, "checkout", "v0.2.0")
 	if err != nil || got != commit {
 		t.Fatalf("resolved source %q, %v", got, err)
 	}
@@ -319,5 +319,16 @@ func TestResolveSource(t *testing.T) {
 	}
 	if _, err = resolveSource(bad, "checkout", "tag"); err == nil {
 		t.Fatal("accepted unidentified source revision")
+	}
+}
+
+func TestRuntimeReadmeUsesMailboxRootAndCurrentAPI(t *testing.T) {
+	for _, required := range []string{"--mailbox-root", "JSON {}", "/api/2026-11-05/registrations", "returned id and directory"} {
+		if !strings.Contains(runtimeReadme, required) {
+			t.Errorf("runtime README missing %q", required)
+		}
+	}
+	if strings.Contains(runtimeReadme, `{"directory"`) {
+		t.Fatal("runtime README retained caller-selected registration directory")
 	}
 }

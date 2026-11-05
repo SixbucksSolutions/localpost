@@ -21,12 +21,12 @@ maintainer; it does not mean the behavior has been implemented or tested.
 
 These are not additional accepted requirements:
 
-- First-release packaging and target qualification follow
-  [ADR 0008](0008-first-release-scope.md); artifact qualification is pending. Development
-  uses Go 1.27.3 as recorded in `.go-version` and the README.
-- Remaining API refinements. Registration uses `POST /registrations`, removal
-  uses `DELETE /registrations/{id}`, and delivery uses `POST /registrations/{id}/messages`;
-  their contracts are documented in the README.
+- First-release packaging and target qualification followed
+  [ADR 0008](0008-first-release-scope.md). The published v0.1.0 release has
+  recorded qualification. The v0.2.0 candidate requires its own qualification.
+  Development uses Go 1.27.3 as recorded in `.go-version` and the README.
+- Remaining API refinements follow the dated routes and contract in
+  [ADR 0010](0010-date-versioned-api.md) and the README.
 - Broader qualification of the implemented registration/upload limits and
   slow-progress behavior. Current fixed defaults are documented in the README.
 - Broader temporary-file recovery policy beyond best-effort cleanup.

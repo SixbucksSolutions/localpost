@@ -1,4 +1,4 @@
-param([string]$ServiceUrl)
+param([string]$ServiceUrl, [string]$MailboxRoot)
 
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -49,6 +49,8 @@ try {
     }
     & node --check examples/browser-diagnostics/pilot.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Browser pilot syntax check failed.' }
+    & node --check examples/browser-diagnostics/browser-check.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Browser proof syntax check failed.' }
     & node --test examples/browser-diagnostics/pilot.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Browser pilot tests failed.' }
     & node scripts/validate-openapi.mjs
@@ -62,7 +64,8 @@ try {
     & node --test scripts/publish-containers.test.mjs
     if ($LASTEXITCODE -ne 0) { throw 'Container publication tests failed.' }
     if ($ServiceUrl) {
-        & node scripts/check-openapi-service.mjs $ServiceUrl
+        if (-not $MailboxRoot) { throw 'Live service checks require -MailboxRoot for the expected server root.' }
+        & node scripts/check-openapi-service.mjs $ServiceUrl $MailboxRoot
         if ($LASTEXITCODE -ne 0) { throw 'Live OpenAPI service checks failed.' }
     }
 

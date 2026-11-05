@@ -2,8 +2,8 @@
   "openapi": "3.2.1",
   "info": {
     "title": "localpost shared daemon API",
-    "version": "0.1.0",
-    "description": "Canonical contract for the implemented shared loopback daemon. The info version identifies the 0.1.0 release-candidate API description; it is independent of the OpenAPI specification version. This document does not assert that the release has been published.\n\nAll three routes share one plain HTTP listener bound to IPv4 loopback 127.0.0.1. There is no authentication, authorization token, credential requirement, origin registration, or origin allowlist. Registration IDs address mailboxes and are not secrets. The caller supplies an existing writable destination on the daemon host. Registrations live only in memory and disappear on process exit; delivery files remain.\n\nCORS: every application response, including application errors, sends Access-Control-Allow-Origin: *, Access-Control-Allow-Headers: Content-Type, and Access-Control-Allow-Methods: POST, DELETE, OPTIONS. OPTIONS on ANY path returns 204 before route/ID validation and creates no file or registration. No Access-Control-Allow-Credentials is sent. Browser callers should omit credentials; application CSP and browser local-network permissions still apply.\n\nRouting is case-sensitive except for hexadecimal letters in UUIDv4 path IDs, which are normalized to lowercase. Unknown paths, including the obsolete bare /messages route, return 404 with not_found. Trailing slashes are not normalized: /registrations/ is treated as a malformed ID (400), while /registrations/{id}/ and /registrations/{id}/messages/ are unrecognized paths (404). Malformed UUIDv4 route IDs return 400 with invalid_registration_id; well-formed unknown or retired IDs return 404 with registration_not_found. On recognized routes, unsupported methods return 405 with Allow: POST or DELETE, subject to the route/ID/admission checks described by each operation. OPTIONS bypasses those checks.\n\nResponses below describe application-handler JSON envelopes. Malformed HTTP headers, invalid framing rejected before handler dispatch, and other net/http transport rejections may instead produce a transport-level response or close the connection, without this JSON envelope or application CORS headers. The server allows 5 seconds for request headers and 30 seconds for control-request reading; uploads override the body deadline with a 30-second progress-based idle deadline. Rejected or incomplete bodies may cause connection closure; successful body consumption allows normal keep-alive reuse.\n\nFixed limits: 64 live registrations and 16 admitted uploads globally. Closing registrations retain capacity through cleanup, and upload slots remain held through publication and the temporary-file cleanup attempt. The 160 MiB aggregate maximum of admitted payload bytes does not bound all memory, retained files, or failed-cleanup leftovers. Shutdown stops new work and provides one shared 30-second grace deadline before interruption; filesystem cleanup can take longer. There is no durable queue, automatic retry, or power-loss durability guarantee."
+    "version": "0.2.0",
+    "description": "Canonical contract for the implemented shared loopback daemon. The info version identifies the 0.2.0 release-candidate API description; it is independent of the OpenAPI specification version. This document does not assert that the release has been published.\n\nAll three routes share one plain HTTP listener bound to IPv4 loopback 127.0.0.1. There is no authentication, authorization token, credential requirement, origin registration, or origin allowlist. Registration IDs address mailboxes and are not secrets. Startup requires --mailbox-root identifying an existing absolute writable directory. The daemon canonicalizes and probes the root before listening. Registration creates a private UUIDv4-named child and returns its absolute canonical path. POSIX mailboxes use 0700 permissions and delivery files use 0600. Windows mailboxes and files inherit the operator-provisioned root ACL. Registrations live only in memory and disappear on process exit; delivery files remain.\n\nCORS: every application response, including application errors, sends Access-Control-Allow-Origin: *, Access-Control-Allow-Headers: Content-Type, and Access-Control-Allow-Methods: POST, DELETE, OPTIONS. The supported API prefix is /api/2026-11-05. Unsupported /api/ prefixes and retired /registrations routes return 404 unsupported_api_version with a message naming the supported prefix, including OPTIONS. Supported-prefix OPTIONS requests return 204 before route/ID validation and create no file or registration. Unrelated unknown paths return 404 not_found, including OPTIONS. No Access-Control-Allow-Credentials is sent. Browser callers should omit credentials; application CSP and browser local-network permissions still apply.\n\nRouting is case-sensitive except for hexadecimal letters in UUIDv4 path IDs, which are normalized to lowercase. Unknown paths, including the obsolete bare /messages route, return 404 with not_found. Under the supported prefix, trailing slashes are not normalized: /registrations/ is treated as a malformed ID (400), while /registrations/{id}/ and /registrations/{id}/messages/ are unrecognized paths (404). Malformed UUIDv4 route IDs return 400 with invalid_registration_id; well-formed unknown or retired IDs return 404 with registration_not_found. On recognized routes, unsupported methods return 405 with Allow: POST or DELETE, subject to the route/ID/admission checks described by each operation. OPTIONS bypasses those checks.\n\nResponses below describe application-handler JSON envelopes. Malformed HTTP headers, invalid framing rejected before handler dispatch, and other net/http transport rejections may instead produce a transport-level response or close the connection, without this JSON envelope or application CORS headers. The server allows 5 seconds for request headers and 30 seconds for control-request reading; uploads override the body deadline with a 30-second progress-based idle deadline. Rejected or incomplete bodies may cause connection closure; successful body consumption allows normal keep-alive reuse.\n\nFixed limits: 64 live registrations and 16 admitted uploads globally. Closing registrations retain capacity through cleanup, and upload slots remain held through publication and the temporary-file cleanup attempt. The 160 MiB aggregate maximum of admitted payload bytes does not bound all memory, retained files, or failed-cleanup leftovers. Shutdown stops new work and provides one shared 30-second grace deadline before interruption; filesystem cleanup can take longer. There is no durable queue, automatic retry, or power-loss durability guarantee."
   },
   "servers": [
     {
@@ -19,14 +19,14 @@
   ],
   "security": [],
   "paths": {
-    "/registrations": {
+    "/api/2026-11-05/registrations": {
       "post": {
         "operationId": "registerMailbox",
-        "summary": "Register an existing destination directory",
-        "description": "Creates an independent in-memory mailbox on the shared listener and returns only its UUIDv4 ID. Registering the same directory again creates another identity. Registrations disappear when the daemon exits; existing delivery files remain. A lost response does not undo registration, and retrying can create another mailbox.\n\nThe canonical request is exactly one JSON object with a `directory` string and no unknown fields. JSON is parsed for this control operation only. Media-type parameters such as `charset=utf-8` are accepted. The body limit is 65,536 bytes (64 KiB), including whitespace, with a 30-second control-request read budget. This is not a filesystem-operation deadline. At most 64 registrations may be live; closing registrations retain capacity until cleanup completes. Saturation rejects immediately without queuing or retrying.",
+        "summary": "Allocate and register a private mailbox",
+        "description": "Accepts exactly one empty JSON object {} and creates a new UUIDv4-named directory under the configured canonical mailbox root before exposing the registration. Returns exactly id and directory. Existing paths are never adopted or overwritten. UUID collisions are retried a bounded number of times. Allocation failures leave no active registration or consumed capacity. Registrations disappear on restart, while directories and files remain. A lost response can leave an orphaned mailbox, and retries can create additional mailboxes. Agents manage retention and retire registrations before removing their own files and directory.\n\nMedia-type parameters such as charset=utf-8 are accepted. The control body limit is 65,536 bytes including whitespace, with a 30-second read budget. At most 64 registrations may be live; closing registrations retain capacity through cleanup. Saturation rejects immediately.",
         "requestBody": {
           "required": true,
-          "description": "One JSON control object. Use the lowercase `directory` key shown here. The implementation uses Go JSON decoding (including case-insensitive field matching and later duplicate-key values); clients should use the canonical single-key object. Missing, null, or empty directory values do not identify an acceptable directory. Content-Type is mandatory even when the body is empty; x-required-request-headers records this constraint because OpenAPI ignores Content-Type Header Parameters.",
+          "description": "Exactly one empty JSON object {}. Empty bodies, null, arrays, multiple objects and every field, including the former directory field in any case, are rejected. Content-Type application/json is mandatory; x-required-request-headers records this because OpenAPI ignores Content-Type Header Parameters.",
           "x-byte-limit": 65536,
           "content": {
             "application/json": {
@@ -34,17 +34,9 @@
                 "$ref": "#/components/schemas/RegistrationRequest"
               },
               "examples": {
-                "windows": {
-                  "summary": "Placeholder directory on a Windows host",
-                  "value": {
-                    "directory": "C:\\localpost-example\\inbox"
-                  }
-                },
-                "posix": {
-                  "summary": "Placeholder directory on a POSIX host",
-                  "value": {
-                    "directory": "/tmp/localpost-example/inbox"
-                  }
+                "empty": {
+                  "summary": "Request a service-created mailbox",
+                  "value": {}
                 }
               }
             }
@@ -52,7 +44,7 @@
         },
         "responses": {
           "200": {
-            "description": "Mailbox registered. The listener port is not returned and does not change.",
+            "description": "Private mailbox directory created and registered. Exactly id and directory are returned; the directory basename equals the lowercase UUIDv4 id.",
             "headers": {
               "Access-Control-Allow-Origin": {
                 "$ref": "#/components/headers/Access-Control-Allow-Origin"
@@ -70,13 +62,14 @@
                   "$ref": "#/components/schemas/Registration"
                 },
                 "example": {
-                  "id": "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
+                  "id": "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b",
+                  "directory": "C:\\ProgramData\\localpost\\mailboxes\\4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
                 }
               }
             }
           },
           "400": {
-            "description": "Malformed, missing, non-object, trailing, or unknown-field JSON, an unreadable or timed-out control body, or an invalid/unwritable directory. Stable error codes: `invalid_request`, `invalid_directory`.",
+            "description": "Malformed, missing, non-object, trailing or nonempty JSON, or an unreadable or timed-out control body. Stable error code invalid_request.",
             "headers": {
               "Access-Control-Allow-Origin": {
                 "$ref": "#/components/headers/Access-Control-Allow-Origin"
@@ -187,6 +180,27 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Mailbox allocation failed because filesystem creation failed or bounded UUID collision retries were exhausted. No registration or capacity is retained. Stable error code mailbox_allocation_failed.",
+            "headers": {
+              "Access-Control-Allow-Origin": {
+                "$ref": "#/components/headers/Access-Control-Allow-Origin"
+              },
+              "Access-Control-Allow-Headers": {
+                "$ref": "#/components/headers/Access-Control-Allow-Headers"
+              },
+              "Access-Control-Allow-Methods": {
+                "$ref": "#/components/headers/Access-Control-Allow-Methods"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
         "x-required-request-headers": [
@@ -196,7 +210,7 @@
       "options": {
         "operationId": "preflightRegistrations",
         "summary": "Handle CORS preflight",
-        "description": "Returns before route, ID, method, media-type, or body validation. No registration or delivery file is created. The same response applies to OPTIONS on every path, including unknown and retired registrations; these three Path Items are not an exhaustive list of preflight paths. No request body is needed.",
+        "description": "Returns before route, ID, method, media-type or body validation for the supported API prefix. No registration or file is created. Unsupported /api/ prefixes and retired unversioned /registrations routes instead return 404 unsupported_api_version with the supported prefix in the error message. Unrelated unknown paths return 404 not_found, including OPTIONS.",
         "responses": {
           "204": {
             "$ref": "#/components/responses/Preflight"
@@ -204,7 +218,7 @@
         }
       }
     },
-    "/registrations/{id}": {
+    "/api/2026-11-05/registrations/{id}": {
       "parameters": [
         {
           "$ref": "#/components/parameters/RegistrationId"
@@ -213,7 +227,7 @@
       "delete": {
         "operationId": "unregisterMailbox",
         "summary": "Retire one mailbox and finish its cleanup",
-        "description": "Stops new uploads for this mailbox, then allows already accepted requests a 30-second grace period. Remaining requests are interrupted at the deadline; progress does not extend it. The response waits for request cleanup attempts, including filesystem operations that can outlast the deadline. It does not shut down the shared listener or affect sibling mailboxes. Completed delivery files remain untouched.\n\nConcurrent DELETE requests while the mailbox is closing join the same operation. Once removal finishes, another DELETE returns 404. Disconnecting the DELETE client does not cancel cleanup; a lost response leaves its outcome uncertain. No request body or Content-Type is required; a supplied body is not used. Whole-daemon shutdown uses one shared grace deadline rather than 30 seconds per mailbox.",
+        "description": "Stops new uploads for this mailbox, then allows already accepted requests a 30-second grace period. Remaining requests are interrupted at the deadline; progress does not extend it. The response waits for request cleanup attempts, including filesystem operations that can outlast the deadline. It does not shut down the shared listener or affect sibling mailboxes. Completed delivery files remain untouched.\n\nConcurrent DELETE requests while the mailbox is closing join the same operation. Once removal finishes, another DELETE returns 404. Disconnecting the DELETE client does not cancel cleanup; a lost response leaves its outcome uncertain. No request body or Content-Type is required; a supplied body is not used. Whole-daemon shutdown uses one shared grace deadline rather than 30 seconds per mailbox.\n\nThe mailbox directory and delivered files remain after retirement. The agent may remove its own mailbox only after retirement completes. Restart also retains directories but invalidates registrations.",
         "responses": {
           "200": {
             "description": "Mailbox removed after accepted request cleanup attempts finish. The returned ID is lowercase even when the path ID used uppercase.",
@@ -317,7 +331,7 @@
       "options": {
         "operationId": "preflightRegistration",
         "summary": "Handle CORS preflight",
-        "description": "Returns before route, ID, method, media-type, or body validation. No registration or delivery file is created. The same response applies to OPTIONS on every path, including unknown and retired registrations; these three Path Items are not an exhaustive list of preflight paths. No request body is needed.",
+        "description": "Returns before route, ID, method, media-type or body validation for the supported API prefix. No registration or file is created. Unsupported /api/ prefixes and retired unversioned /registrations routes instead return 404 unsupported_api_version with the supported prefix in the error message. Unrelated unknown paths return 404 not_found, including OPTIONS.",
         "responses": {
           "204": {
             "$ref": "#/components/responses/Preflight"
@@ -336,7 +350,7 @@
         ]
       }
     },
-    "/registrations/{id}/messages": {
+    "/api/2026-11-05/registrations/{id}/messages": {
       "parameters": [
         {
           "$ref": "#/components/parameters/RegistrationId"
@@ -565,7 +579,7 @@
       "options": {
         "operationId": "preflightMessages",
         "summary": "Handle CORS preflight",
-        "description": "Returns before route, ID, method, media-type, or body validation. No registration or delivery file is created. The same response applies to OPTIONS on every path, including unknown and retired registrations; these three Path Items are not an exhaustive list of preflight paths. No request body is needed.",
+        "description": "Returns before route, ID, method, media-type or body validation for the supported API prefix. No registration or file is created. Unsupported /api/ prefixes and retired unversioned /registrations routes instead return 404 unsupported_api_version with the supported prefix in the error message. Unrelated unknown paths return 404 not_found, including OPTIONS.",
         "responses": {
           "204": {
             "$ref": "#/components/responses/Preflight"
@@ -594,35 +608,33 @@
         "description": "Canonical lowercase RFC-variant UUIDv4 registration identity. This is a mailbox address, not an authentication credential. It is unrelated to the UUIDv7 used in delivery filenames.",
         "examples": [
           "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
-        ]
+        ],
+        "minLength": 36,
+        "maxLength": 36
       },
       "RegistrationRequest": {
         "type": "object",
-        "properties": {
-          "directory": {
-            "$ref": "#/components/schemas/DestinationDirectory"
-          }
-        },
+        "properties": {},
         "additionalProperties": false,
-        "patternProperties": {
-          "^[dD][iI][rR][eE][cC][tT][oO][rR][yY]$": {
-            "$ref": "#/components/schemas/DestinationDirectory"
-          }
-        },
-        "minProperties": 1,
-        "description": "A directory field is required. Its name is matched case-insensitively by the Go decoder; lowercase directory is the canonical spelling. Unknown fields are rejected. This schema describes the single-field form and validates each alias if several are supplied. It cannot express raw duplicate-key or member-order semantics: later string values replace earlier ones, while JSON null leaves an existing string unchanged. Clients should send one field; the selected value must identify an existing usable absolute directory."
+        "maxProperties": 0,
+        "description": "Exactly one empty JSON object. No fields or former directory aliases are accepted."
       },
       "Registration": {
         "type": "object",
         "properties": {
           "id": {
             "$ref": "#/components/schemas/RegistrationId"
+          },
+          "directory": {
+            "$ref": "#/components/schemas/DestinationDirectory"
           }
         },
         "required": [
-          "id"
+          "id",
+          "directory"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "Exactly id and directory. The absolute canonical directory is a newly created direct child of the configured root and its basename equals id. This cross-field equality is verified by clients; JSON Schema does not express it."
       },
       "Unregistration": {
         "type": "object",
@@ -655,7 +667,9 @@
             "description": "Basename of the complete published file in the registered directory, using an RFC-variant UUIDv7. Never a path or registration ID.",
             "examples": [
               "localpost_019a4fb0-1a00-7000-8000-000000000001.dat"
-            ]
+            ],
+            "minLength": 50,
+            "maxLength": 50
           },
           "bytes": {
             "type": "integer",
@@ -681,7 +695,6 @@
                 "type": "string",
                 "enum": [
                   "invalid_request",
-                  "invalid_directory",
                   "invalid_registration_id",
                   "not_found",
                   "registration_not_found",
@@ -692,7 +705,9 @@
                   "delivery_failed",
                   "unavailable",
                   "registration_limit",
-                  "upload_limit"
+                  "upload_limit",
+                  "mailbox_allocation_failed",
+                  "unsupported_api_version"
                 ],
                 "description": "Stable application error identifier. Each operation response documents the codes applicable to its status."
               },
@@ -716,9 +731,11 @@
       "DestinationDirectory": {
         "type": "string",
         "minLength": 1,
-        "description": "Existing absolute directory path in the daemon host filesystem. The caller creates it and supplies permissions; localpost neither creates nor repairs it. A temporary file write/close/remove probe must succeed. Successful validation cannot guarantee later writes. Use the native absolute path syntax of the host.",
+        "pattern": "^(?:/(?:[^\\u0000]*/)?|[A-Za-z]:\\\\(?:[^\\u0000]*\\\\)?|\\\\\\\\[^\\\\\\u0000]+\\\\[^\\\\\\u0000]+\\\\(?:[^\\u0000]*\\\\)?)[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])",
+        "description": "Absolute canonical service-side path to the newly allocated mailbox. The basename equals the returned lowercase UUIDv4 id. The parent is the configured canonical mailbox root. Use native host path syntax. The directory remains after DELETE and restart.",
         "examples": [
-          "C:\\localpost-example\\inbox"
+          "C:\\ProgramData\\localpost\\mailboxes\\4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b",
+          "/var/lib/localpost/mailboxes/4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
         ]
       }
     },
@@ -731,7 +748,9 @@
         "schema": {
           "type": "string",
           "format": "uuid",
-          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$",
+          "minLength": 36,
+          "maxLength": 36
         },
         "example": "4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b"
       }
@@ -764,7 +783,7 @@
     },
     "responses": {
       "Preflight": {
-        "description": "CORS preflight accepted with no response body, no registration, and no delivery file. Applies to any path, independent of ID validity or registration existence.",
+        "description": "CORS preflight accepted with no body, registration or file. Applies to supported-version paths regardless of ID validity or existence. Unsupported /api/ prefixes and retired unversioned /registrations routes return 404 unsupported_api_version instead. Unrelated unknown paths return 404 not_found.",
         "headers": {
           "Access-Control-Allow-Origin": {
             "$ref": "#/components/headers/Access-Control-Allow-Origin"
@@ -776,7 +795,42 @@
             "$ref": "#/components/headers/Access-Control-Allow-Methods"
           }
         }
+      },
+      "UnsupportedApiVersion": {
+        "description": "Unsupported API contract version.",
+        "headers": {
+          "Access-Control-Allow-Origin": {
+            "$ref": "#/components/headers/Access-Control-Allow-Origin"
+          },
+          "Access-Control-Allow-Headers": {
+            "$ref": "#/components/headers/Access-Control-Allow-Headers"
+          },
+          "Access-Control-Allow-Methods": {
+            "$ref": "#/components/headers/Access-Control-Allow-Methods"
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": {
+                "code": "unsupported_api_version",
+                "message": "use the supported API prefix /api/2026-11-05"
+              }
+            }
+          }
+        }
       }
+    }
+  },
+  "x-unsupported-api-version": {
+    "status": 404,
+    "code": "unsupported_api_version",
+    "description": "All methods, including OPTIONS, under unsupported /api/ prefixes or retired unversioned /registrations routes return the standard Error envelope. The message names /api/2026-11-05. All three CORS headers retain their documented values.",
+    "response": {
+      "$ref": "#/components/responses/UnsupportedApiVersion"
     }
   }
 }

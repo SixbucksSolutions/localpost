@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   prepare:
@@ -27,7 +28,7 @@ jobs:
           ARCHITECTURE: ${{ inputs.architecture }}
         run: |
           case "$ARCHITECTURE" in
-            amd64) echo 'matrix={"include":[{"runner":"ubuntu-24.04","platform":"ubuntu-24.04","architecture":"amd64"},{"runner":"ubuntu-26.04","platform":"alpine-3.24","architecture":"amd64"}]}' >> "$GITHUB_OUTPUT" ;;
+            amd64) echo 'matrix={"include":[{"runner":"ubuntu-24.04","platform":"ubuntu-24.04","architecture":"amd64"},{"runner":"ubuntu-26.04","platform":"ubuntu-26.04","architecture":"amd64"},{"runner":"ubuntu-26.04","platform":"alpine-3.24","architecture":"amd64"}]}' >> "$GITHUB_OUTPUT" ;;
             arm64) echo 'matrix={"include":[{"runner":"ubuntu-24.04-arm","platform":"ubuntu-24.04","architecture":"arm64"},{"runner":"ubuntu-26.04-arm","platform":"ubuntu-26.04","architecture":"arm64"},{"runner":"ubuntu-26.04-arm","platform":"alpine-3.24","architecture":"arm64"}]}' >> "$GITHUB_OUTPUT" ;;
             *) exit 1 ;;
           esac
@@ -38,6 +39,9 @@ jobs:
       matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
+    env:
+      CERTIFY_ARCHITECTURE: ${{ matrix.architecture }}
+      CERTIFY_PLATFORM: ${{ matrix.platform }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -50,46 +54,69 @@ jobs:
         with:
           go-version-file: .go-version
           cache: false
+      - name: Read frozen candidate identity
+        id: distribution
+        run: |
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const version = JSON.parse(fs.readFileSync('openapi.json')).info.version;
+          assert.equal(candidate.version, version);
+          assert.match(version, /^0\.2\.0$/);
+          assert.equal(candidate.tag, `v${version}`);
+          assert.match(candidate.sourceCommit, /^[0-9a-f]{40}$/);
+          assert.equal(candidate.artifactName, `localpost-${version}-${candidate.sourceCommit}`);
+          assert.ok(Number.isSafeInteger(candidate.artifactRunId) && candidate.artifactRunId > 0);
+          const names = [`localpost_${version}_windows_amd64.zip`, `localpost_${version}_linux_amd64.tar.gz`, `localpost_${version}_linux_arm64.tar.gz`];
+          assert.deepEqual(candidate.assets.map(asset => asset.name).sort(), names.sort());
+          for (const asset of [...candidate.assets, candidate.checksumFile]) assert.match(asset.sha256, /^[0-9a-f]{64}$/);
+          assert.equal(candidate.checksumFile.name, 'SHA256SUMS');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `published=${candidate.publicationStatus === 'published'}\nrun-id=${candidate.artifactRunId}\nartifact-name=${candidate.artifactName}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_VERSION=${version}\nSOURCE_COMMIT=${candidate.sourceCommit}\n`);
+          JS
+      - name: Download frozen candidate bytes
+        if: steps.distribution.outputs.published != 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ steps.distribution.outputs.run-id }}
+          name: ${{ steps.distribution.outputs.artifact-name }}
+          path: ${{ runner.temp }}/candidate
       - name: Download published bytes without authentication
-        env:
-          ARCHITECTURE: ${{ matrix.architecture }}
+        if: steps.distribution.outputs.published == 'true'
         run: |
           mkdir "$RUNNER_TEMP/candidate"
-          for asset in "localpost_0.1.0_linux_$ARCHITECTURE.tar.gz" SHA256SUMS; do
-            curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 "https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/$asset" -o "$RUNNER_TEMP/candidate/$asset"
+          for asset in "localpost_${RELEASE_VERSION}_windows_amd64.zip" "localpost_${RELEASE_VERSION}_linux_amd64.tar.gz" "localpost_${RELEASE_VERSION}_linux_arm64.tar.gz" SHA256SUMS; do
+            curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 "https://github.com/SixbucksSolutions/localpost/releases/download/v$RELEASE_VERSION/$asset" -o "$RUNNER_TEMP/candidate/$asset"
           done
-      - name: Verify archive identity and unpack
-        env:
-          ARCHITECTURE: ${{ matrix.architecture }}
+      - name: Verify frozen archive identity and unpack
         run: |
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import path from 'node:path';
           import assert from 'node:assert/strict';
-          import {createHash} from 'node:crypto';
-          const root=path.join(process.env.RUNNER_TEMP,'candidate');
-          const name=`localpost_0.1.0_linux_${process.env.ARCHITECTURE}.tar.gz`;
-          const hash=createHash('sha256').update(fs.readFileSync(path.join(root,name))).digest('hex');
-          const sums=fs.readFileSync(path.join(root,'SHA256SUMS'),'utf8');
-          assert.ok(sums.split('\n').includes(`${hash}  ${name}`));
-          const accepted=JSON.parse(fs.readFileSync('release/0.1.0-candidate.json'));
-          assert.equal(hash,accepted.assets.find(a=>a.name===name).sha256);
-          assert.equal(createHash('sha256').update(sums).digest('hex'),accepted.checksumFile.sha256);
+          import { createHash } from 'node:crypto';
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const root = path.join(process.env.RUNNER_TEMP, 'candidate');
+          const sums = fs.readFileSync(path.join(root, 'SHA256SUMS'), 'utf8');
+          for (const asset of [...candidate.assets, candidate.checksumFile]) {
+            const hash = createHash('sha256').update(fs.readFileSync(path.join(root, asset.name))).digest('hex');
+            assert.equal(hash, asset.sha256);
+            if (asset !== candidate.checksumFile) assert.ok(sums.split('\n').includes(`${hash}  ${asset.name}`));
+          }
           JS
           mkdir "$RUNNER_TEMP/unpacked"
-          tar -xzf "$RUNNER_TEMP/candidate/localpost_0.1.0_linux_$ARCHITECTURE.tar.gz" -C "$RUNNER_TEMP/unpacked"
-          git diff --exit-code 852b8a9ded0d03e98cada5810b18c92746848545 -- cmd/localpost go.mod .go-version
+          tar -xzf "$RUNNER_TEMP/candidate/localpost_${RELEASE_VERSION}_linux_$CERTIFY_ARCHITECTURE.tar.gz" -C "$RUNNER_TEMP/unpacked"
+          git diff --exit-code "$SOURCE_COMMIT" -- cmd/localpost go.mod .go-version
           npm ci --ignore-scripts --no-audit --no-fund
       - name: Exercise native packaged service and filesystem
-        env:
-          CERTIFY_ARCHITECTURE: ${{ matrix.architecture }}
-          CERTIFY_PLATFORM: ${{ matrix.platform }}
         run: bash scripts/run-platform-certification.sh
       - name: Retain platform evidence and candidate identity
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: certification-${{ matrix.platform }}-${{ matrix.architecture }}-${{ github.run_id }}
+          name: certification-${{ env.CERTIFY_PLATFORM }}-${{ env.CERTIFY_ARCHITECTURE }}-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/certification/*
             ${{ runner.temp }}/candidate/SHA256SUMS

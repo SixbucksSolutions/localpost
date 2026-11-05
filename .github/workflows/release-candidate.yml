@@ -42,19 +42,25 @@ jobs:
         with:
           go-version-file: .go-version
           cache: false
+      - name: Set up version reader
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version-file: .node-version
       - name: Test packaging code
         run: go test ./tools/release
       - name: Build and compare candidate packages
         run: |
-          go run ./tools/release --version 0.1.0 --output "$RUNNER_TEMP/localpost-package-a"
-          go run ./tools/release --version 0.1.0 --output "$RUNNER_TEMP/localpost-package-b"
+          version=$(node -p "JSON.parse(require('fs').readFileSync('openapi.json')).info.version")
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          go run ./tools/release --version "$version" --output "$RUNNER_TEMP/localpost-package-a"
+          go run ./tools/release --version "$version" --output "$RUNNER_TEMP/localpost-package-b"
           diff -u "$RUNNER_TEMP/localpost-package-a/SHA256SUMS" "$RUNNER_TEMP/localpost-package-b/SHA256SUMS"
           cd "$RUNNER_TEMP/localpost-package-a"
           sha256sum --check SHA256SUMS
       - name: Retain the candidate for qualification
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: localpost-0.1.0-${{ github.sha }}
+          name: localpost-${{ env.RELEASE_VERSION }}-${{ github.sha }}
           path: ${{ runner.temp }}/localpost-package-a/*
           if-no-files-found: error
           compression-level: 0

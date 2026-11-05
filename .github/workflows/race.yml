@@ -62,6 +62,7 @@ jobs:
       - name: Check browser pilot
         run: |
           node --check examples/browser-diagnostics/pilot.mjs
+          node --check examples/browser-diagnostics/browser-check.mjs
           node --test examples/browser-diagnostics/pilot.test.mjs
       - name: Validate OpenAPI contract
         run: |
@@ -71,9 +72,10 @@ jobs:
       - name: Check live service contract
         run: |
           go build -o "$RUNNER_TEMP/localpost-contract" ./cmd/localpost
-          "$RUNNER_TEMP/localpost-contract" --port 53149 >"$RUNNER_TEMP/localpost-contract.log" 2>&1 &
+          mailbox_root=$(mktemp -d "$RUNNER_TEMP/localpost-contract-mailboxes.XXXXXX")
+          "$RUNNER_TEMP/localpost-contract" --port 53149 --mailbox-root "$mailbox_root" >"$RUNNER_TEMP/localpost-contract.log" 2>&1 &
           service_pid=$!
-          trap 'kill "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true' EXIT
+          trap 'kill -INT "$service_pid" 2>/dev/null || true; wait "$service_pid" 2>/dev/null || true; rm -rf -- "$mailbox_root"' EXIT
           service_ready=0
           for _ in {1..30}; do
             if ! kill -0 "$service_pid" 2>/dev/null; then
@@ -94,7 +96,7 @@ jobs:
             exit 1
           fi
           kill -0 "$service_pid"
-          node scripts/check-openapi-service.mjs http://127.0.0.1:53149
+          node scripts/check-openapi-service.mjs http://127.0.0.1:53149 "$mailbox_root"
       - name: Run race-instrumented tests
         run: go test -race -count=3 -timeout=5m ./...
       - name: Vet source

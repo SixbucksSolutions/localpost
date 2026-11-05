@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
-import { access, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, readFile, rm, writeFile, mkdir, mkdtemp, realpath, rmdir, symlink } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import os from 'node:os';
 import test from 'node:test';
-import { checkContractInvariants, requestBounded, runServiceCheck, validateBaseUrl } from './check-openapi-service.mjs';
+import { checkContractInvariants, requestBounded, runServiceCheck, validateBaseUrl, readRegularFileBounded } from './check-openapi-service.mjs';
 
 const document = JSON.parse(await readFile(new URL('../openapi.json', import.meta.url), 'utf8'));
+const prefix = '/api/2026-11-05';
 const id = '4e23a5f1-2d7f-4d2b-9d5a-1d47120a493b';
 const cors = {
   'access-control-allow-origin': '*',
@@ -16,22 +17,30 @@ const cors = {
 };
 const reply = (status, value) => ({ status, headers: { ...cors }, body: value === undefined ? Buffer.alloc(0) : Buffer.from(JSON.stringify(value)) });
 
-function fakeService({ failDelivery, registrationExtra = false, badCleanup = false } = {}) {
-  const state = { directory: undefined, registrationKey: undefined, deleted: 0, posts: 0 };
+function fakeService({ failDelivery, registrationExtra = false, badCleanup = false, badDirectory = false, existing = false } = {}) {
+  const state = { directory: undefined, registration: undefined, deleted: 0, posts: 0 };
+  const rootReady = mkdtemp(path.join(os.tmpdir(), 'localpost-openapi-test-')).then(realpath);
+  const cleanup = async () => {
+    const root = await rootReady;
+    assert.equal(path.dirname(root), await realpath(os.tmpdir()));
+    assert.ok(path.basename(root).startsWith('localpost-openapi-test-'));
+    await rm(root, { recursive: true, force: true });
+  };
   const request = async ({ url, method, body, headers }) => {
     const route = new URL(url).pathname;
-    if (method === 'OPTIONS') return reply(204);
+    if (route.startsWith('/api/') && !route.startsWith(prefix + '/') || route === '/registrations' || route.startsWith('/registrations/')) return reply(404, { error: { code: 'unsupported_api_version', message: `Use ${prefix}` } });
+    if (method === 'OPTIONS') return route.startsWith(prefix + '/') ? reply(204) : reply(404, { error: { code: 'not_found', message: 'Test response' } });
     if (method === 'GET') {
       const response = reply(405, { error: { code: 'method_not_allowed', message: 'Test response' } });
-      response.headers.allow = route === `/registrations/${id}` ? 'DELETE' : 'POST';
+      response.headers.allow = route === `${prefix}/registrations/${id}` ? 'DELETE' : 'POST';
       return response;
     }
     if (method === 'POST' && !headers['Content-Type']) return reply(415, { error: { code: 'unsupported_media_type', message: 'Test response' } });
-    if (route === '/registrations' && body.toString() !== '{') {
-      const registration = JSON.parse(body);
-      state.registrationKey = Object.keys(registration).find((key) => key.toLowerCase() === 'directory');
-      state.directory = registration[state.registrationKey];
-      return reply(200, registrationExtra ? { id, port: 53147 } : { id });
+    if (route === prefix + '/registrations' && body.toString() === '{}') {
+      state.registration = JSON.parse(body);
+      state.directory = path.join(await rootReady, id);
+      await mkdir(state.directory, { recursive: existing });
+      return reply(200, { id, directory: badDirectory ? path.join(await rootReady, 'other') : state.directory, ...(registrationExtra ? { port: 53147 } : {}) });
     }
     if (method === 'DELETE') {
       state.deleted++;
@@ -52,10 +61,13 @@ function fakeService({ failDelivery, registrationExtra = false, badCleanup = fal
     else if (headers['Content-Type'] === 'text/plain') { status = 415; code = 'unsupported_media_type'; }
     return reply(status, { error: { code, message: 'Test response' } });
   };
-  return { state, request };
+  return { state, request, rootReady, cleanup };
 }
 
-const run = (request) => runServiceCheck({ baseUrl: 'http://127.0.0.1:53147', document, request });
+const run = async (service, request = service.request) => {
+  try { return await runServiceCheck({ baseUrl: 'http://127.0.0.1:53147', document, request, mailboxRoot: await service.rootReady }); }
+  finally { if (!service.preserveFixture) await rmdir(await service.rootReady); }
+};
 const removed = async (directory) => assert.rejects(access(directory), { code: 'ENOENT' });
 
 test('requires an explicit plain loopback origin before making requests', async () => {
@@ -67,31 +79,31 @@ test('requires an explicit plain loopback origin before making requests', async 
 
 test('completes the probe with byte-exact files and removes its registration and directory', async () => {
   const service = fakeService();
-  const result = await run(service.request);
+  const result = await run(service);
   assert.equal(result.deliveries, 3);
   assert.equal(service.state.posts, 3);
-  assert.equal(service.state.registrationKey, 'DiReCtOrY');
+  assert.deepEqual(service.state.registration, {});
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
 
 test('malformed delivery JSON still retires the mailbox and removes its private directory', async () => {
   const service = fakeService({ failDelivery: { ...reply(200), body: Buffer.from('{') } });
-  await assert.rejects(run(service.request), /valid JSON/);
+  await assert.rejects(run(service), /valid JSON/);
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
 
 test('unsafe receipt filenames never become filesystem paths', async () => {
   const service = fakeService({ failDelivery: reply(200, { filename: '../outside.dat', bytes: 6 }) });
-  await assert.rejects(run(service.request));
+  await assert.rejects(run(service));
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
 
 test('unexpected registration fields do not leak the identifiable mailbox', async () => {
   const service = fakeService({ registrationExtra: true });
-  await assert.rejects(run(service.request));
+  await assert.rejects(run(service));
   assert.equal(service.state.deleted, 1);
   assert.equal(service.state.posts, 0);
   await removed(service.state.directory);
@@ -99,8 +111,9 @@ test('unexpected registration fields do not leak the identifiable mailbox', asyn
 
 test('unconfirmed retirement preserves the inbox and private recovery context', async () => {
   const service = fakeService({ failDelivery: { ...reply(200), body: Buffer.from('{') }, badCleanup: true });
+  service.preserveFixture = true;
   try {
-    await assert.rejects(run(service.request), (error) => {
+    await assert.rejects(run(service), (error) => {
       assert.match(error.message, /cleanup could not be confirmed/);
       assert.equal(error.preservedDirectory, service.state.directory);
       assert.equal(error.registrationId, id);
@@ -109,19 +122,16 @@ test('unconfirmed retirement preserves the inbox and private recovery context', 
     });
     await access(service.state.directory);
   } finally {
-    // The fake service owns no real mailbox; retire the test fixture explicitly.
-    assert.equal(path.dirname(path.resolve(service.state.directory)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(service.state.directory).startsWith('localpost-openapi-'));
-    await rm(service.state.directory, { recursive: true, force: true });
+    await service.cleanup();
   }
 });
 
 test('contract guards reject opaque-body schemas and authentication drift', () => {
   const changed = structuredClone(document);
-  changed.paths['/registrations/{id}/messages'].post.requestBody.content['application/json'].schema = { type: 'object' };
+  changed.paths[prefix + '/registrations/{id}/messages'].post.requestBody.content['application/json'].schema = { type: 'object' };
   assert.throws(() => checkContractInvariants(changed));
   const authenticated = structuredClone(document);
-  authenticated.paths['/registrations'].post.security = [{ bearer: [] }];
+  authenticated.paths[prefix + '/registrations'].post.security = [{ bearer: [] }];
   assert.throws(() => checkContractInvariants(authenticated));
 });
 
@@ -160,10 +170,10 @@ test('missing CORS headers fail the probe and retain enough identity for cleanup
   const service = fakeService();
   const request = async (options) => {
     const response = await service.request(options);
-    if (options.method === 'POST' && new URL(options.url).pathname === '/registrations') delete response.headers['access-control-allow-origin'];
+    if (options.method === 'POST' && new URL(options.url).pathname === prefix + '/registrations') delete response.headers['access-control-allow-origin'];
     return response;
   };
-  await assert.rejects(run(request), /access-control-allow-origin/);
+  await assert.rejects(run(service, request), /access-control-allow-origin/);
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
@@ -178,7 +188,7 @@ test('a false byte count fails even when the filename and file are valid', async
     }
     return response;
   };
-  await assert.rejects(run(request));
+  await assert.rejects(run(service, request));
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
@@ -190,7 +200,7 @@ test('preflight side effects are detected and cleaned up', async () => {
     if (options.method === 'OPTIONS') await writeFile(path.join(service.state.directory, 'unexpected'), 'side effect');
     return response;
   };
-  await assert.rejects(run(request), /changed files/);
+  await assert.rejects(run(service, request), /changed files/);
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
@@ -201,11 +211,11 @@ test('contract guards reject weakened mandatory response and request headers', (
     (copy) => { delete copy.components.headers['Access-Control-Allow-Origin'].required; },
     (copy) => { copy.components.headers['Access-Control-Allow-Headers'].required = false; },
     (copy) => { copy.components.headers['Access-Control-Allow-Methods'].schema.const = 'POST'; },
-    (copy) => { delete copy.paths['/registrations'].post.responses['405'].headers.Allow.required; },
-    (copy) => { copy.paths['/registrations/{id}'].delete.responses['405'].headers.Allow.schema.const = 'POST'; },
-    (copy) => { delete copy.paths['/registrations'].post['x-required-request-headers']; },
-    (copy) => { copy.paths['/registrations/{id}/messages'].post['x-required-request-headers'] = []; },
-    (copy) => { delete copy.paths['/registrations'].post.responses['200'].headers['Access-Control-Allow-Origin']; },
+    (copy) => { delete copy.paths[prefix + '/registrations'].post.responses['405'].headers.Allow.required; },
+    (copy) => { copy.paths[prefix + '/registrations/{id}'].delete.responses['405'].headers.Allow.schema.const = 'POST'; },
+    (copy) => { delete copy.paths[prefix + '/registrations'].post['x-required-request-headers']; },
+    (copy) => { copy.paths[prefix + '/registrations/{id}/messages'].post['x-required-request-headers'] = []; },
+    (copy) => { delete copy.paths[prefix + '/registrations'].post.responses['200'].headers['Access-Control-Allow-Origin']; },
   ];
   for (const mutate of mutations) {
     const copy = structuredClone(document);
@@ -221,7 +231,7 @@ test('missing Allow on a method rejection fails the live check', async () => {
     if (options.method === 'GET') delete response.headers.allow;
     return response;
   };
-  await assert.rejects(run(request), /Allow header/);
+  await assert.rejects(run(service, request), /Allow header/);
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
@@ -234,18 +244,99 @@ test('accepting an empty upload without Content-Type fails the live check', asyn
     }
     return service.request(options);
   };
-  await assert.rejects(run(request), /HTTP status/);
+  await assert.rejects(run(service, request), /HTTP status/);
   assert.equal(service.state.deleted, 1);
   await removed(service.state.directory);
 });
 
 
-test('registration input schema accepts case aliases but rejects missing and unknown fields', () => {
+test('registration input schema accepts only an empty object', () => {
   const validate = checkContractInvariants(document);
-  for (const key of ['directory', 'Directory', 'DiReCtOrY']) {
-    assert.doesNotThrow(() => validate('#/components/schemas/RegistrationRequest', { [key]: '/example/inbox' }));
+  validate('#/components/schemas/RegistrationRequest', {});
+  for (const value of [null, [], { directory: '/example/inbox' }, { Directory: '/example/inbox' }, { folder: '/example/inbox' }]) {
+    assert.throws(() => validate('#/components/schemas/RegistrationRequest', value));
   }
-  assert.throws(() => validate('#/components/schemas/RegistrationRequest', {}));
-  assert.throws(() => validate('#/components/schemas/RegistrationRequest', { folder: '/example/inbox' }));
-  assert.throws(() => validate('#/components/schemas/RegistrationRequest', { Directory: '/example/inbox', unexpected: true }));
+});
+
+test('untrusted response path is never read or removed', async () => {
+  const service = fakeService({ badDirectory: true });
+  service.preserveFixture = true;
+  try {
+    await assert.rejects(run(service), /cleanup could not be confirmed/);
+    assert.equal(service.state.deleted, 1);
+    assert.equal(service.state.posts, 0);
+    await access(service.state.directory);
+  } finally { await service.cleanup(); }
+});
+
+test('preexisting mailbox is never used or removed', async () => {
+  const service = fakeService({ existing: true });
+  service.preserveFixture = true;
+  const directory = path.join(await service.rootReady, id);
+  await mkdir(directory);
+  await writeFile(path.join(directory, 'keep'), 'prior data');
+  try {
+    await assert.rejects(run(service), /cleanup could not be confirmed/);
+    assert.equal(service.state.deleted, 0);
+    assert.equal(service.state.posts, 0);
+    assert.equal(await readFile(path.join(directory, 'keep'), 'utf8'), 'prior data');
+  } finally { await service.cleanup(); }
+});
+
+test('explicit canonical mailbox root is required before HTTP requests', async () => {
+  let requests = 0;
+  await assert.rejects(runServiceCheck({ baseUrl: 'http://127.0.0.1:53147', document, request: () => { requests++; } }), /mailbox root/);
+  assert.equal(requests, 0);
+});
+
+test('probe file reads enforce hard byte bounds including zero bytes', async () => {
+  const service = fakeService();
+  const file = path.join(await service.rootReady, 'bounded.dat');
+  try {
+    await writeFile(file, Buffer.alloc(0));
+    assert.deepEqual(await readRegularFileBounded(file, 0), Buffer.alloc(0));
+    await writeFile(file, 'payload');
+    assert.equal((await readRegularFileBounded(file, 7)).toString(), 'payload');
+    await assert.rejects(readRegularFileBounded(file, 6), /exceeded byte limit/);
+    assert.equal((await readRegularFileBounded(file, 8)).toString(), 'payload');
+    await assert.rejects(readRegularFileBounded(file, 10485761), /byte bound/);
+    await assert.rejects(readRegularFileBounded(await service.rootReady, 0), /Unexpected probe file/);
+    // A rejected read closes its handle, including on Windows.
+    await rm(file);
+  } finally { await service.cleanup(); }
+});
+
+test('probe file reads reject symlinks without reading their targets', async (t) => {
+  const service = fakeService();
+  const root = await service.rootReady;
+  const target = path.join(root, 'target.dat');
+  const link = path.join(root, 'link.dat');
+  try {
+    await writeFile(target, 'private target');
+    try { await symlink(target, link, 'file'); }
+    catch (error) {
+      if (process.platform === 'win32' && ['EPERM', 'EACCES'].includes(error.code)) {
+        t.skip('Windows host does not grant file symlink creation');
+        return;
+      }
+      throw error;
+    }
+    await assert.rejects(readRegularFileBounded(link, 14), /Unexpected probe file/);
+    assert.equal(await readFile(target, 'utf8'), 'private target');
+  } finally { await service.cleanup(); }
+});
+
+test('oversized delivered files fail before a receipt can cause unbounded reads', async () => {
+  const service = fakeService();
+  const request = async (options) => {
+    const response = await service.request(options);
+    if (service.state.posts === 1 && options.method === 'POST' && new URL(options.url).pathname.endsWith('/messages')) {
+      const receipt = JSON.parse(response.body);
+      await writeFile(path.join(service.state.directory, receipt.filename), Buffer.alloc(1024 * 1024));
+    }
+    return response;
+  };
+  await assert.rejects(run(service, request), /exceeded byte limit/);
+  assert.equal(service.state.deleted, 1);
+  await removed(service.state.directory);
 });

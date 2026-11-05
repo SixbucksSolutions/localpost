@@ -45,10 +45,10 @@ type manifest struct {
 }
 
 func main() {
-	version := flag.String("version", "", "release version (for example 0.1.0)")
+	version := flag.String("version", "", "release version (for example 0.2.0)")
 	output := flag.String("output", "", "new or empty candidate output directory")
 	sourceRef := flag.String("source-ref", "HEAD", "Git source revision to archive")
-	targets := flag.String("targets", "windows/amd64,linux/amd64", "comma-separated package targets")
+	targets := flag.String("targets", "windows/amd64,linux/amd64,linux/arm64", "comma-separated package targets")
 	flag.Parse()
 	if flag.NArg() != 0 {
 		// Reporting failure is best effort immediately before process exit.
@@ -481,8 +481,10 @@ required to run this executable.
 
 Unpack the whole archive into a new directory. Run as an ordinary user:
 
-Windows (PowerShell): .\localpost.exe
-Linux: ./localpost
+Create an absolute mailbox root writable by the daemon user first. Then run:
+
+Windows (PowerShell): .\localpost.exe --mailbox-root C:\localpost-mailboxes
+Linux: ./localpost --mailbox-root /absolute/path/to/localpost-mailboxes
 
 The default address is http://127.0.0.1:53147. Use --port 53148 to select another
 port. An occupied port causes startup to fail. Use --version to inspect the
@@ -492,15 +494,15 @@ period up to 30 seconds; filesystem operations do not have a hard time limit.
 
 ## Use
 
-Create an absolute destination directory writable by the daemon's user. POST
-JSON {"directory":"<absolute directory>"} to /registrations. The returned id
-selects /registrations/{id}/messages: POST opaque bytes there to deliver one
-complete localpost_[UUIDv7].dat file. DELETE /registrations/{id} when finished.
+POST JSON {} to /api/2026-11-05/registrations. The returned id and directory
+identify a newly created mailbox beneath the configured root. POST opaque bytes
+to /api/2026-11-05/registrations/{id}/messages to deliver one complete
+localpost_[UUIDv7].dat file. DELETE /api/2026-11-05/registrations/{id} when finished.
 Registrations exist only in memory and must be recreated after a restart.
 Delivered files are preserved. See openapi.json for errors and limits.
 
 The listener is loopback-only, with permissive CORS and no authentication. Any
-local process or browser page may call it. Register only intended directories;
+local process or browser page may call it. Keep the mailbox root private;
 do not expose it through a public proxy or bind it to external interfaces.
 
 ## Upgrade and rollback

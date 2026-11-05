@@ -1,6 +1,6 @@
 # High-level architecture
 
-**Status:** one-listener architecture. The executable, UUID-addressed mailbox
+**Status:** v0.2.0 development is pending release. One-listener architecture. The executable, UUID-addressed mailbox
 registration, message delivery, unregistration, and browser CORS are implemented.
 Bounded robustness qualification accompanies the core. A headless Chrome pilot
 has also exercised the browser-to-file diagnostic feedback loop on Windows.
@@ -27,12 +27,12 @@ flowchart LR
     Sender[Browser JS or HTTP client] -->|POST with registration ID in path| Listener
     Listener --> Registry[In-memory UUIDv4 registration table]
     Registry --> Writer[Temporary file then complete-file publication]
-    Writer --> Directory[Agent-created directory]
+    Writer --> Directory[Service-created mailbox directory]
     Directory -->|Read complete .dat files| Agent
     Process --- Listener
 ```
 
-The diagram shows one registration. Each UUIDv4 maps to one existing absolute
+The diagram shows one registration. Each UUIDv4 maps to one service-created absolute
 directory and its logical request-lifecycle state. The shared API creates and
 removes these mappings; registrations own no HTTP server or listening port.
 
@@ -48,31 +48,30 @@ Delivered files belong to the agent and survive independently of the daemon.
 
 ## Registration
 
-1. The agent creates its destination directory and arranges write permissions.
-2. It sends an admin request containing the absolute directory path.
-3. localpost checks that the path is an existing usable directory. It does not
-   create missing parents, alter permissions, or choose a replacement directory.
-4. localpost creates a UUIDv4 registration and records its directory mapping.
-5. The API returns `200` with the registration ID. It allocates no new listener.
+1. The operator provisions an existing absolute root and starts the daemon with
+   `--mailbox-root`. The service resolves and probes the root before listening.
+2. The agent sends `{}` to `POST /api/2026-11-05/registrations`.
+3. localpost creates a new UUIDv4-named child and returns `id` and its absolute
+   `directory`. The registration does not contain a process ID.
+4. A failed allocation leaves no active mailbox or consumed capacity.
 
-A failed registration leaves no active mailbox. Registration-time checking does
-not guarantee later writes: the directory can disappear or become unwritable.
-Each delivery must report its actual outcome.
+The control request is bounded to 64 KiB with a 30-second read budget. The
+filesystem operations have no deadline. The service never adopts an existing
+child. A successful startup probe does not guarantee later writes.
 
-The implemented registration route is `POST /registrations`, with a JSON object
-containing `directory`. It returns HTTP `200` with `id`. Application errors use a
-JSON `error` object with stable
-`code` and readable `message`. The control API is JSON; message bodies stay opaque.
-The registration identity is an opaque value for callers.
+POSIX mailbox directories use `0700` and files use `0600`. The daemon and agent
+run under the same UID. Windows directories and files inherit the root ACL, which
+must grant appropriate access to the service and agent. Docker mounts the root
+at the same absolute host and container path so the returned path is usable.
 
-The control request is bounded to 64 KiB, with a 30-second read
-budget. This does not impose a deadline on filesystem operations. Directory
-validation creates, closes, and removes a temporary probe before accepting the
-registration; it never creates the directory or alters permissions.
+Control responses use a JSON error object with a stable code. Retired unversioned
+routes and unsupported dates return `404 unsupported_api_version` naming the
+supported prefix. Supported preflights return `204`. Unsupported-version
+preflights fail with the same version error and CORS headers.
 
 ## Receiving and publishing a message
 
-One completed `POST /registrations/{id}/messages` body is one message. The accepted
+One completed `POST /api/2026-11-05/registrations/{id}/messages` body is one message. The accepted
 media types are `application/octet-stream` and `application/json`, including
 media-type parameters. Both types use the same opaque-byte pipeline.
 
@@ -141,7 +140,7 @@ bytes to localpost; file publication remains centralized here.
 
 ## Unregistration and process lifecycle
 
-`DELETE /registrations/{id}` stops accepting new uploads on that registration,
+`DELETE /api/2026-11-05/registrations/{id}` stops accepting new uploads on that registration,
 allows accepted uploads to finish within a 30-second grace period, then removes
 the mapping. It does not close the shared listener. Remaining incomplete uploads
 are aborted without publishing final files. Upload progress does not extend that deadline.
@@ -159,8 +158,8 @@ Forced interruption is bound to the admitted request's lifetime. Finished
 requests remove their interruption hooks before the connection can be reused,
 so an old registration cannot abort a later request for a different one.
 
-Unregistration does not delete completed files. A normal process stop likewise
-closes the listener with bounded network cleanup. A crash loses every registration;
+Unregistration does not delete the mailbox directory or completed files. A normal process stop likewise
+closes the listener with bounded network cleanup. A crash loses every registration while preserving directories and files;
 there is no restart recovery. Agents register again after a person restarts the
 daemon. Agents do not start it automatically or create a substitute collector.
 
@@ -204,5 +203,5 @@ concurrency qualification tests, plus a Linux race-instrumented CI run. Release
 artifact qualification supports the [published v0.1.0 release](releases/v0.1.0.md). The
 [browser pilot](../examples/browser-diagnostics/README.md) records its verified
 headless Chrome workflow; it does not establish cross-browser coverage.
-First-release targets and artifact/publication rules are accepted in
-[ADR 0008](adr/0008-first-release-scope.md); release qualification is still pending.
+First-release targets and artifact/publication rules are recorded in
+[ADR 0008](adr/0008-first-release-scope.md). The v0.2.0 candidate requires its own qualification.

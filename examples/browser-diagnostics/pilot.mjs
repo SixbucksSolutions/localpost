@@ -14,7 +14,7 @@ export function endpoint(base, registrationId) {
       url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
     throw new Error("invalid_config");
   }
-  return `${url.origin}/registrations/${registrationId}/messages`;
+  return `${url.origin}/api/2026-11-05/registrations/${registrationId}/messages`;
 }
 
 export function diagnostic(runId, sequence, observedCount) {

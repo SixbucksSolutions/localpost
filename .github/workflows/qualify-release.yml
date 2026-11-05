@@ -1,16 +1,6 @@
-name: Qualify accepted release candidate
+name: Qualify frozen release candidate
 
 on:
-  push:
-    paths:
-      - 'scripts/qualify-packaged-service*'
-      - release/0.1.0-candidate.json
-      - .github/workflows/qualify-release.yml
-  pull_request:
-    paths:
-      - 'scripts/qualify-packaged-service*'
-      - release/0.1.0-candidate.json
-      - .github/workflows/qualify-release.yml
   workflow_dispatch:
 
 permissions:
@@ -20,107 +10,87 @@ permissions:
 jobs:
   linux:
     runs-on: ubuntu-26.04
-    timeout-minutes: 10
+    timeout-minutes: 15
+    env:
+      CERTIFY_ARCHITECTURE: amd64
+      CERTIFY_PLATFORM: ubuntu-26.04
     steps:
-      - name: Check out qualification harness
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          persist-credentials: false
           fetch-depth: 0
-      - name: Set up check runtimes
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: .node-version
-      - name: Set up source-test Go
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: .go-version
           cache: false
-      - name: Select the verified distribution source
+      - name: Read frozen candidate identity
         id: distribution
         run: |
-          published=$(node -p "JSON.parse(require('fs').readFileSync('release/0.1.0-candidate.json')).publicationStatus === 'published'")
-          echo "published=$published" >> "$GITHUB_OUTPUT"
-      - name: Download the accepted candidate
+          node --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import assert from 'node:assert/strict';
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const version = JSON.parse(fs.readFileSync('openapi.json')).info.version;
+          assert.equal(candidate.version, version);
+          assert.match(version, /^0\.2\.0$/);
+          assert.equal(candidate.tag, `v${version}`);
+          assert.match(candidate.sourceCommit, /^[0-9a-f]{40}$/);
+          assert.equal(candidate.artifactName, `localpost-${version}-${candidate.sourceCommit}`);
+          assert.ok(Number.isSafeInteger(candidate.artifactRunId) && candidate.artifactRunId > 0);
+          const names = [`localpost_${version}_windows_amd64.zip`, `localpost_${version}_linux_amd64.tar.gz`, `localpost_${version}_linux_arm64.tar.gz`];
+          assert.deepEqual(candidate.assets.map(asset => asset.name).sort(), names.sort());
+          for (const asset of [...candidate.assets, candidate.checksumFile]) assert.match(asset.sha256, /^[0-9a-f]{64}$/);
+          assert.equal(candidate.checksumFile.name, 'SHA256SUMS');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, `published=${candidate.publicationStatus === 'published'}\nrun-id=${candidate.artifactRunId}\nartifact-name=${candidate.artifactName}\n`);
+          fs.appendFileSync(process.env.GITHUB_ENV, `RELEASE_VERSION=${version}\nSOURCE_COMMIT=${candidate.sourceCommit}\n`);
+          JS
+      - name: Download frozen candidate bytes
         if: steps.distribution.outputs.published != 'true'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           github-token: ${{ github.token }}
-          run-id: 41950300326
-          name: localpost-0.1.0-852b8a9ded0d03e98cada5810b18c92746848545
+          run-id: ${{ steps.distribution.outputs.run-id }}
+          name: ${{ steps.distribution.outputs.artifact-name }}
           path: ${{ runner.temp }}/candidate
-      - name: Download the published assets without authentication
+      - name: Download published bytes without authentication
         if: steps.distribution.outputs.published == 'true'
         run: |
           mkdir "$RUNNER_TEMP/candidate"
-          for asset in localpost_0.1.0_windows_amd64.zip localpost_0.1.0_linux_amd64.tar.gz localpost_0.1.0_linux_arm64.tar.gz SHA256SUMS; do
-            curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 "https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/$asset" -o "$RUNNER_TEMP/candidate/$asset"
+          for asset in "localpost_${RELEASE_VERSION}_windows_amd64.zip" "localpost_${RELEASE_VERSION}_linux_amd64.tar.gz" "localpost_${RELEASE_VERSION}_linux_arm64.tar.gz" SHA256SUMS; do
+            curl --fail --location --silent --show-error --connect-timeout 10 --max-time 60 "https://github.com/SixbucksSolutions/localpost/releases/download/v$RELEASE_VERSION/$asset" -o "$RUNNER_TEMP/candidate/$asset"
           done
-      - name: Verify and unpack existing artifacts
-        env:
-          CANDIDATE_DIR: ${{ runner.temp }}/candidate
+      - name: Verify frozen archive identity and unpack
         run: |
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import path from 'node:path';
           import assert from 'node:assert/strict';
-          import {createHash} from 'node:crypto';
-          const c=JSON.parse(fs.readFileSync('release/0.1.0-candidate.json'));
-          for(const a of [...c.assets,c.checksumFile]) assert.equal(createHash('sha256').update(fs.readFileSync(path.join(process.env.CANDIDATE_DIR,a.name))).digest('hex'),a.sha256);
+          import { createHash } from 'node:crypto';
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const root = path.join(process.env.RUNNER_TEMP, 'candidate');
+          const sums = fs.readFileSync(path.join(root, 'SHA256SUMS'), 'utf8');
+          for (const asset of [...candidate.assets, candidate.checksumFile]) {
+            const hash = createHash('sha256').update(fs.readFileSync(path.join(root, asset.name))).digest('hex');
+            assert.equal(hash, asset.sha256);
+            if (asset !== candidate.checksumFile) assert.ok(sums.split('\n').includes(`${hash}  ${asset.name}`));
+          }
           JS
           mkdir "$RUNNER_TEMP/unpacked"
-          tar -xzf "$CANDIDATE_DIR/localpost_0.1.0_linux_amd64.tar.gz" -C "$RUNNER_TEMP/unpacked"
-          git diff --exit-code 852b8a9ded0d03e98cada5810b18c92746848545 -- cmd/localpost go.mod .go-version
+          tar -xzf "$RUNNER_TEMP/candidate/localpost_${RELEASE_VERSION}_linux_$CERTIFY_ARCHITECTURE.tar.gz" -C "$RUNNER_TEMP/unpacked"
+          git diff --exit-code "$SOURCE_COMMIT" -- cmd/localpost go.mod .go-version
           npm ci --ignore-scripts --no-audit --no-fund
-      - name: Qualify the packaged Linux executable
-        run: |
-          . /etc/os-release
-          test "$ID" = ubuntu
-          test "$VERSION_ID" = 26.04
-          test "$(id -u)" != 0
-          package="$RUNNER_TEMP/unpacked/localpost_0.1.0_linux_amd64"
-          binary="$package/localpost"
-          env PATH= "$binary" --port 53151 >"$RUNNER_TEMP/override.log" 2>&1 &
-          override_pid=$!
-          env PATH= "$binary" >"$RUNNER_TEMP/default.log" 2>&1 &
-          default_pid=$!
-          trap 'kill -INT "$override_pid" "$default_pid" 2>/dev/null || true; sleep 1; kill "$override_pid" "$default_pid" 2>/dev/null || true; wait 2>/dev/null || true' EXIT
-          for port in 53151 53147; do
-            ready=0
-            for _ in {1..40}; do
-              if curl --silent --output /dev/null --connect-timeout 1 "http://127.0.0.1:$port/"; then ready=1; break; fi
-              sleep 0.1
-            done
-            test "$ready" = 1
-          done
-          kill -0 "$override_pid" "$default_pid"
-          if env PATH= "$binary" >"$RUNNER_TEMP/conflict.log" 2>&1; then echo 'Occupied default port was accepted' >&2; exit 1; fi
-          grep -q '127.0.0.1:53147' "$RUNNER_TEMP/conflict.log"
-          node scripts/qualify-packaged-service.mjs --package-dir "$package" --base-url http://127.0.0.1:53151 --expected-commit 852b8a9ded0d03e98cada5810b18c92746848545 --evidence "$RUNNER_TEMP/linux-qualification.json"
-          kill -INT "$override_pid" "$default_pid"
-          for _ in {1..50}; do
-            if ! kill -0 "$override_pid" 2>/dev/null && ! kill -0 "$default_pid" 2>/dev/null; then break; fi
-            sleep 0.1
-          done
-          if kill -0 "$override_pid" 2>/dev/null || kill -0 "$default_pid" 2>/dev/null; then echo 'SIGINT shutdown exceeded bound' >&2; exit 1; fi
-          wait "$override_pid"
-          wait "$default_pid"
-          trap - EXIT
-          {
-            printf 'uid=%s\n' "$(id -u)"
-            printf 'distribution=%s %s\n' "$ID" "$VERSION_ID"
-            uname -srmo
-            stat -f -c 'temporary-filesystem=%T' "${TMPDIR:-/tmp}"
-            printf 'mounted-filesystem=%s\n' "$(findmnt -n -o FSTYPE -T "${TMPDIR:-/tmp}")"
-            printf 'runtime-PATH=empty\nSIGINT-shutdown=passed\ndefault-and-override=passed\n'
-          } >"$RUNNER_TEMP/linux-host.txt"
-      - name: Reuse source collision checks
-        run: go test ./cmd/localpost -run '^TestMessageStorageFailures$' -count=1
-      - name: Retain qualification evidence
+      - name: Exercise native packaged service and filesystem
+        run: bash scripts/run-platform-certification.sh
+      - name: Retain platform evidence and candidate identity
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: linux-release-qualification-${{ github.sha }}
+          name: certification-${{ env.CERTIFY_PLATFORM }}-${{ env.CERTIFY_ARCHITECTURE }}-${{ github.run_id }}
           path: |
-            ${{ runner.temp }}/linux-qualification.json
-            ${{ runner.temp }}/linux-host.txt
+            ${{ runner.temp }}/certification/*
+            ${{ runner.temp }}/candidate/SHA256SUMS
           if-no-files-found: error
+          retention-days: 90

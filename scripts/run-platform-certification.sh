@@ -4,12 +4,14 @@ set -euo pipefail
 
 architecture=${CERTIFY_ARCHITECTURE:?}
 platform=${CERTIFY_PLATFORM:?}
-package="$RUNNER_TEMP/unpacked/localpost_0.1.0_linux_$architecture"
+package="$RUNNER_TEMP/unpacked/localpost_${RELEASE_VERSION:?}_linux_$architecture"
 binary="$package/localpost"
 report="$RUNNER_TEMP/certification"
 mkdir -p "$report"
 export TMPDIR
 TMPDIR=$(mktemp -d "$RUNNER_TEMP/localpost-certification.XXXXXX")
+mkdir "$TMPDIR/mailboxes"
+mailbox_root="$TMPDIR/mailboxes"
 name="localpost-certify-${GITHUB_RUN_ID:?}-${GITHUB_JOB:?}"
 image=alpine:3.24.3
 pids=()
@@ -50,7 +52,7 @@ esac
   printf 'filesystem='; stat -f -c '%T' "$TMPDIR"
   printf 'mount-filesystem=%s\n' "$(findmnt -n -o FSTYPE -T "$TMPDIR")"
   printf 'filesystem-device=%s\n' "$(stat -c %d "$TMPDIR")"
-  printf 'source=852b8a9ded0d03e98cada5810b18c92746848545\nbuilder=%s\n' "$GITHUB_SHA"
+  printf 'source=%s\nbuilder=%s\n' "${SOURCE_COMMIT:?}" "$GITHUB_SHA"
   sha256sum "$binary" "$package/build-info.json"
 } >"$report/platform.txt"
 
@@ -75,9 +77,9 @@ start() {
       --user "$(id -u):$(id -g)" --env PATH= --env "TMPDIR=$TMPDIR" \
       --mount "type=bind,source=$package,target=/package,readonly" \
       --mount "type=bind,source=$TMPDIR,target=$TMPDIR" \
-      --entrypoint /package/localpost "$image" "$@" >/dev/null
+      --entrypoint /package/localpost "$image" --mailbox-root "$mailbox_root" "$@" >/dev/null
   else
-    env PATH= "$binary" "$@" >"$report/$suffix.log" 2>&1 &
+    env PATH= "$binary" --mailbox-root "$mailbox_root" "$@" >"$report/$suffix.log" 2>&1 &
     pids+=("$!")
   fi
 }
@@ -135,18 +137,19 @@ for port in 53147 53151; do
     containers+=("$name-conflict-$port")
     if docker run --name "$name-conflict-$port" --network host --user "$(id -u):$(id -g)" \
       --env PATH= --mount "type=bind,source=$package,target=/package,readonly" \
-      --entrypoint /package/localpost "$image" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
+      --mount "type=bind,source=$TMPDIR,target=$TMPDIR" \
+      --entrypoint /package/localpost "$image" --mailbox-root "$mailbox_root" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
       echo "Occupied port $port was accepted" >&2; exit 1
     fi
   else
-    if env PATH= "$binary" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
+    if env PATH= "$binary" --mailbox-root "$mailbox_root" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
       echo "Occupied port $port was accepted" >&2; exit 1
     fi
   fi
   grep -q "127.0.0.1:$port" "$report/conflict-$port.log"
 done
 node scripts/qualify-packaged-service.mjs --package-dir "$package" \
-  --base-url http://127.0.0.1:53151 --expected-commit 852b8a9ded0d03e98cada5810b18c92746848545 \
+  --base-url http://127.0.0.1:53151 --expected-commit "$SOURCE_COMMIT" --mailbox-root "$mailbox_root" \
   --evidence "$report/qualification.json"
 assert_running
 

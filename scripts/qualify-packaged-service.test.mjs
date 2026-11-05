@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { access, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,16 +19,16 @@ async function fixture(t, host = process) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const packageTarget = `${host.platform === 'win32' ? 'windows' : host.platform}/${host.arch === 'x64' ? 'amd64' : host.arch}`;
   const architectureSettings = host.arch === 'arm64' ? { GOARM64: 'v8.0' } : { GOAMD64: 'v1' };
-  const manifest = { version: '0.1.0', sourceCommit: commit, target: packageTarget, toolchain: 'go1.27.3', binarySHA256: hash('test binary'), settings: { CGO_ENABLED: '0', ...architectureSettings, trimpath: 'true', buildvcs: 'false' } };
+  const manifest = { version: '0.2.0', sourceCommit: commit, target: packageTarget, toolchain: 'go1.27.3', binarySHA256: hash('test binary'), settings: { CGO_ENABLED: '0', ...architectureSettings, trimpath: 'true', buildvcs: 'false' } };
   await writeFile(path.join(directory, host.platform === 'win32' ? 'localpost.exe' : 'localpost'), 'test binary');
-  await writeFile(path.join(directory, 'openapi.json'), JSON.stringify({ info: { version: '0.1.0' } }));
+  await writeFile(path.join(directory, 'openapi.json'), JSON.stringify({ info: { version: '0.2.0' } }));
   const save = () => writeFile(path.join(directory, 'build-info.json'), JSON.stringify(manifest));
   await save();
   return { directory, manifest, save };
 }
 
 test('requires explicit distinct options and a plain loopback origin', () => {
-  const args = ['--package-dir', 'package', '--base-url', 'http://127.0.0.1:53147', '--expected-commit', commit, '--evidence', 'evidence.json'];
+  const args = ['--package-dir', 'package', '--base-url', 'http://127.0.0.1:53147', '--expected-commit', commit, '--mailbox-root', '/mailboxes', '--evidence', 'evidence.json'];
   assert.equal(parseArguments(args).expectedCommit, commit);
   assert.throws(() => parseArguments(args.slice(0, -2)));
   assert.throws(() => parseArguments([...args, '--evidence', 'other.json']));
@@ -44,7 +44,7 @@ test('validates exact packaged identity before running absolute binary with an e
     assert.deepEqual(args, ['--version']);
     assert.equal(options.env.PATH, '');
     assert.ok(Object.entries(options.env).every(([key, value]) => key.toLowerCase() !== 'path' || value === ''));
-    return { stdout: `localpost 0.1.0 (commit ${commit}; go1.27.3; ${target})\n`, stderr: '' };
+    return { stdout: `localpost 0.2.0 (commit ${commit}; go1.27.3; ${target})\n`, stderr: '' };
   } });
   assert.equal(called, true);
   assert.equal(result.identity.binarySHA256, hash('test binary'));
@@ -71,7 +71,7 @@ for (const host of [{ platform: 'win32', arch: 'x64' }, { platform: 'linux', arc
     const { directory, manifest } = await fixture(t, host);
     const result = await inspectPackage({ packageDir: directory, expectedCommit: commit, host, run: async (command) => {
       assert.equal(command, path.join(directory, host.platform === 'win32' ? 'localpost.exe' : 'localpost'));
-      return { stdout: `localpost 0.1.0 (commit ${commit}; go1.27.3; ${manifest.target})\n`, stderr: '' };
+      return { stdout: `localpost 0.2.0 (commit ${commit}; go1.27.3; ${manifest.target})\n`, stderr: '' };
     } });
     assert.equal(result.identity.target, manifest.target);
   });
@@ -109,15 +109,19 @@ test('rejects ARM64 tuning in an AMD64 package before execution', async (t) => {
   await assert.rejects(inspectPackage({ packageDir: directory, expectedCommit: commit, host, run: () => assert.fail('Invalid package executed') }));
 });
 
-async function fakeServer(t, { premature = false, cleanupFails = false } = {}) {
+async function fakeServer(t, { premature = false, cleanupFails = false, responseDirectory } = {}) {
+  const mailboxRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), 'localpost-probe-test-')));
+  t.after(() => rm(mailboxRoot, { recursive: true, force: true }));
   const state = { directory: undefined, retired: 0 };
   const server = http.createServer(async (req, res) => {
     const json = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
-    if (req.url === '/registrations') {
+    if (req.url === '/api/2026-11-05/registrations') {
       const chunks = [];
       for await (const chunk of req) chunks.push(chunk);
-      state.directory = JSON.parse(Buffer.concat(chunks)).directory;
-      json(200, { id });
+      assert.deepEqual(JSON.parse(Buffer.concat(chunks)), {});
+      state.directory = path.join(mailboxRoot, id);
+      await mkdir(state.directory);
+      json(200, { id, directory: responseDirectory ?? state.directory });
     } else if (req.method === 'DELETE') {
       state.retired++;
       json(cleanupFails ? 500 : 200, { id, unregistered: true, forced: false });
@@ -148,12 +152,12 @@ async function fakeServer(t, { premature = false, cleanupFails = false } = {}) {
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => new Promise((resolve) => server.close(resolve)));
-  return { state, baseUrl: `http://127.0.0.1:${server.address().port}` };
+  return { state, mailboxRoot, baseUrl: `http://127.0.0.1:${server.address().port}` };
 }
 
 test('observes in-progress bytes, exact completion and disconnect cleanup, then retires and removes owned inbox', async (t) => {
-  const { state, baseUrl } = await fakeServer(t);
-  const result = await runPublicationProbe({ baseUrl });
+  const { state, mailboxRoot, baseUrl } = await fakeServer(t);
+  const result = await runPublicationProbe({ baseUrl, mailboxRoot });
   assert.equal(result.partialUpload.finalAbsentUntilCompletion, true);
   assert.equal(result.disconnectedUpload.temporaryRemoved, true);
   assert.equal(result.retainedSentinel.unchanged, true);
@@ -164,20 +168,39 @@ test('observes in-progress bytes, exact completion and disconnect cleanup, then 
 });
 
 test('premature publication fails but still retires owned registration and cleans directory', async (t) => {
-  const { state, baseUrl } = await fakeServer(t, { premature: true });
-  await assert.rejects(runPublicationProbe({ baseUrl }));
+  const { state, mailboxRoot, baseUrl } = await fakeServer(t, { premature: true });
+  await assert.rejects(runPublicationProbe({ baseUrl, mailboxRoot }));
   assert.equal(state.retired, 1);
   await assert.rejects(access(state.directory), { code: 'ENOENT' });
 });
 
 test('failed retirement preserves owned inbox and returns private recovery context', async (t) => {
-  const { state, baseUrl } = await fakeServer(t, { cleanupFails: true });
+  const { state, mailboxRoot, baseUrl } = await fakeServer(t, { cleanupFails: true });
   let failure;
-  try { await runPublicationProbe({ baseUrl }); } catch (error) { failure = error; }
+  try { await runPublicationProbe({ baseUrl, mailboxRoot }); } catch (error) { failure = error; }
   assert.ok(failure);
   assert.equal(failure.preservedDirectory, state.directory);
   assert.equal(failure.registrationId, id);
   assert.equal(Object.keys(failure).includes('preservedDirectory'), false);
   assert.ok((await readFile(path.join(state.directory, delivered))).length > 0);
   await rm(state.directory, { recursive: true, force: true });
+});
+
+
+test('rejects server-selected paths outside the root before writing or removing files', async (t) => {
+  const outside = await realpath(await mkdtemp(path.join(os.tmpdir(), 'localpost-outside-test-')));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const sentinel = path.join(outside, 'retained-sentinel.dat');
+  await writeFile(sentinel, 'keep');
+  const { state, mailboxRoot, baseUrl } = await fakeServer(t, { responseDirectory: outside });
+  await assert.rejects(runPublicationProbe({ baseUrl, mailboxRoot }), /Mailbox escaped configured root/);
+  assert.equal(state.retired, 1);
+  assert.equal(await readFile(sentinel, 'utf8'), 'keep');
+  await assert.rejects(access(path.join(state.directory, 'retained-sentinel.dat')), { code: 'ENOENT' });
+});
+
+test('requires an existing absolute mailbox root before making requests', async () => {
+  for (const mailboxRoot of [undefined, 'relative-mailboxes']) {
+    await assert.rejects(runPublicationProbe({ baseUrl: 'http://127.0.0.1:53151', mailboxRoot, request: () => assert.fail('Invalid root sent a request') }));
+  }
 });
