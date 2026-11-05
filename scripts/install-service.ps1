@@ -21,7 +21,7 @@ function Resolve-LocalPath([string]$Value) {
     $cursor = $full
     while ($cursor) {
         if (Test-Path -LiteralPath $cursor) {
-            if ((Get-Item -LiteralPath $cursor).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not supported in service paths.' }
+            if ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse points are not supported in service paths.' }
         }
         $cursor = Split-Path -Parent $cursor
     }
