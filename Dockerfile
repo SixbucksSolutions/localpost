@@ -1,8 +1,8 @@
 FROM scratch
 
 # Build with the verified, unpacked release archive as the build context.
-ARG VERSION=0.1.0
-ARG SOURCE_REVISION=852b8a9ded0d03e98cada5810b18c92746848545
+ARG VERSION=0.2.0
+ARG SOURCE_REVISION
 ARG PACKAGING_REVISION
 
 LABEL org.opencontainers.image.title="localpost" \

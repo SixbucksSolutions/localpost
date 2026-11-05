@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { checkImageIdentity, checkIndex, checkPromotionSource, isMissingManifest } from './publish-containers.mjs';
+import { checkImageIdentity, checkIndex, checkPromotionSource, checkPublicationPolicy, isMissingManifest } from './publish-containers.mjs';
 
-const reference = 'ghcr.io/sixbuckssolutions/localpost:0.1.0';
+const reference = 'ghcr.io/sixbuckssolutions/localpost:0.2.0';
 test('missing version permits only recognized manifest absence', () => {
   for (const stderr of [
     'ERROR: manifest unknown',
     'ERROR: MANIFEST_UNKNOWN: manifest unknown',
     `ERROR: ${reference}: not found`,
-    'unexpected status from HEAD request to https://ghcr.io/v2/sixbuckssolutions/localpost/manifests/0.1.0: 404 Not Found',
+    'unexpected status from HEAD request to https://ghcr.io/v2/sixbuckssolutions/localpost/manifests/0.2.0: 404 Not Found',
   ]) assert.equal(isMissingManifest({ stderr }, reference), true);
   for (const stderr of [
     'unauthorized: authentication required',
@@ -54,24 +54,35 @@ test('image identity accepts only verified Docker store representations', () => 
   assert.throws(() => checkImageIdentity(platformDigest, { ...platform, indexDigest: 'invalid' }));
 });
 
-test('promotion resume accepts only the approved fully verified source run', () => {
+test('promotion resume requires an identical revision and fully verified source run', () => {
   const repository = 'SixbucksSolutions/localpost';
-  const runId = '42034182097';
-  const run = { id: Number(runId), repository: { full_name: repository }, path: '.github/workflows/publish-containers.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'failure' };
+  const runId = '42055362444';
+  const packagingRevision = 'a'.repeat(40);
+  const run = { head_sha: packagingRevision, id: Number(runId), repository: { full_name: repository }, path: '.github/workflows/publish-containers.yml', event: 'workflow_dispatch', status: 'completed', conclusion: 'failure' };
   const names = ['qualify (ubuntu-26.04, amd64)', 'qualify (ubuntu-26.04-arm, arm64)', 'publish', 'anonymous (ubuntu-26.04, amd64)', 'anonymous (ubuntu-26.04-arm, arm64)', 'promote'];
   const jobs = { total_count: 6, jobs: names.map((name) => ({ name, status: 'completed', conclusion: name === 'promote' ? 'failure' : 'success' })) };
-  checkPromotionSource(run, jobs, repository, runId);
-  for (const field of ['path', 'event', 'status', 'conclusion']) {
-    assert.throws(() => checkPromotionSource({ ...run, [field]: 'wrong' }, jobs, repository, runId));
+  checkPromotionSource(run, jobs, repository, runId, packagingRevision);
+  for (const field of ['head_sha', 'path', 'event', 'status', 'conclusion']) {
+    assert.throws(() => checkPromotionSource({ ...run, [field]: 'wrong' }, jobs, repository, runId, packagingRevision));
   }
-  assert.throws(() => checkPromotionSource(run, jobs, 'another/repository', runId));
-  assert.throws(() => checkPromotionSource(run, jobs, repository, '42034182098'));
+  assert.throws(() => checkPromotionSource(run, jobs, 'another/repository', runId, packagingRevision));
+  assert.throws(() => checkPromotionSource(run, jobs, repository, '42055362445', packagingRevision));
   for (let index = 0; index < jobs.jobs.length; index++) {
     const changed = structuredClone(jobs);
     changed.jobs[index].conclusion = index === 5 ? 'success' : 'failure';
-    assert.throws(() => checkPromotionSource(run, changed, repository, runId));
+    assert.throws(() => checkPromotionSource(run, changed, repository, runId, packagingRevision));
   }
   const duplicate = structuredClone(jobs);
   duplicate.jobs[1] = duplicate.jobs[0];
-  assert.throws(() => checkPromotionSource(run, duplicate, repository, runId));
+  assert.throws(() => checkPromotionSource(run, duplicate, repository, runId, packagingRevision));
+});
+
+
+test('publication requires explicit opt-in and the published qualified candidate', () => {
+  const candidate = { version: '0.2.0', publicationStatus: 'published', qualification: { status: 'passed' } };
+  checkPublicationPolicy(candidate, 'true');
+  for (const optIn of [undefined, '', 'false', true]) assert.throws(() => checkPublicationPolicy(candidate, optIn));
+  assert.throws(() => checkPublicationPolicy({ ...candidate, version: '0.1.0' }, 'true'));
+  assert.throws(() => checkPublicationPolicy({ ...candidate, publicationStatus: 'candidate' }, 'true'));
+  assert.throws(() => checkPublicationPolicy({ ...candidate, qualification: { status: 'development' } }, 'true'));
 });

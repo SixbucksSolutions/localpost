@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const execute = promisify(execFile);
 const image = 'ghcr.io/sixbuckssolutions/localpost';
-const version = '0.1.0';
+const version = '0.2.0';
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const docker = async (...args) => (await execute('docker', args, { timeout: 180000, maxBuffer: 2 * 1024 * 1024 })).stdout.trim();
 export function isMissingManifest(error, reference) {
@@ -53,8 +53,10 @@ export const checkIndex = (index, platforms) => {
     assert.equal(descriptor.digest, platforms[architecture].digest);
   }
 };
-export function checkPromotionSource(run, jobs, repository, runId) {
-  assert.equal(runId, '42034182097', 'Only the explicitly approved failed-promotion run may be resumed');
+export function checkPromotionSource(run, jobs, repository, runId, packagingRevision) {
+  assert.match(runId, /^[1-9][0-9]*$/);
+  assert.match(packagingRevision, /^[0-9a-f]{40}$/);
+  assert.equal(run.head_sha, packagingRevision, 'Resume requires the identical workflow revision');
   assert.equal(String(run.id), runId);
   assert.equal(run.repository.full_name.toLowerCase(), repository.toLowerCase());
   assert.equal(run.path, '.github/workflows/publish-containers.yml');
@@ -79,19 +81,30 @@ export function checkPromotionSource(run, jobs, repository, runId) {
   assert.equal(expected.size, 0);
 }
 
+export function checkPublicationPolicy(candidate, optIn) {
+  assert.equal(optIn, 'true', 'Explicit publication opt-in is required');
+  assert.equal(candidate.version, version);
+  assert.equal(candidate.publicationStatus, 'published');
+  assert.equal(candidate.qualification.status, 'passed');
+}
+
 export async function main(mode = process.argv[2]) {
   const root = path.join(process.env.RUNNER_TEMP, 'container-publication');
   await mkdir(root, { recursive: true });
+  if (['publish', 'promote', 'resume-check'].includes(mode)) {
+    const candidate = JSON.parse(await readFile('release/0.2.0-candidate.json'));
+    checkPublicationPolicy(candidate, process.env.PUBLISH_CONTAINERS);
+  }
   if (mode === 'resume-check') {
     const runId = process.env.PROMOTE_RUN_ID;
-    assert.equal(runId, '42034182097', 'Unapproved promotion source run');
+    assert.match(runId, /^[1-9][0-9]*$/);
     const repository = process.env.GITHUB_REPOSITORY;
     assert.equal(repository.toLowerCase(), 'sixbuckssolutions/localpost');
     const endpoint = `repos/${repository}/actions/runs/${runId}`;
     const query = async (route) => JSON.parse((await execute('gh', ['api', route], { timeout: 30000, maxBuffer: 1024 * 1024 })).stdout);
     const run = await query(endpoint);
     const jobs = await query(`${endpoint}/jobs?filter=latest&per_page=100`);
-    checkPromotionSource(run, jobs, repository, runId);
+    checkPromotionSource(run, jobs, repository, runId, process.env.GITHUB_SHA);
     console.log(`Verified completed qualification, publication and anonymous jobs for promotion source ${runId}.`);
     return;
   }
@@ -106,6 +119,8 @@ export async function main(mode = process.argv[2]) {
       const [local] = JSON.parse(await docker('image', 'inspect', `localpost-qualified:${architecture}`));
       assert.equal(local.Id, identity.imageId);
       assert.equal(local.Architecture, architecture);
+      assert.equal(local.Config.Labels['org.opencontainers.image.version'], version);
+      assert.equal(local.Config.Labels['io.localpost.packaging-revision'], process.env.GITHUB_SHA);
       const tag = `${image}:candidate-${process.env.GITHUB_RUN_ID}-${architecture}`;
       await docker('tag', identity.imageId, tag);
       await docker('push', tag);

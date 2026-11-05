@@ -3,25 +3,33 @@ name: Publish qualified containers
 on:
   workflow_dispatch:
     inputs:
+      publish:
+        description: Publish qualified v0.2.0 containers and promote latest
+        required: true
+        type: boolean
+        default: false
       promote_run_id:
-        description: Resume promotion only from approved run 42034182097
+        description: Resume only a failed promotion from this exact workflow revision
         required: false
         type: string
         default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: publish-localpost-0.1.0
+  group: publish-localpost-0.2.0
   cancel-in-progress: false
 
 env:
   IMAGE: ghcr.io/sixbuckssolutions/localpost
+  PUBLISH_CONTAINERS: ${{ inputs.publish }}
+  GH_TOKEN: ${{ github.token }}
 
 jobs:
   qualify:
-    if: inputs.promote_run_id == ''
+    if: ${{ !inputs.publish || inputs.promote_run_id == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -43,20 +51,21 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version-file: .node-version
-      - name: Verify published archive and native host
+      - name: Verify candidate archive and native host
         run: |
           node scripts/container-package.mjs
           npm ci --ignore-scripts --no-audit --no-fund
           node --test scripts/publish-containers.test.mjs
       - name: Package existing release bytes
         run: |
-          source_epoch=$(git show -s --format=%ct 852b8a9ded0d03e98cada5810b18c92746848545)
+          source_epoch=$(git show -s --format=%ct "$SOURCE_COMMIT")
           docker buildx build --load --provenance=false --sbom=false \
             --platform "linux/$ARCHITECTURE" \
             --build-arg "SOURCE_DATE_EPOCH=$source_epoch" \
+            --build-arg "SOURCE_REVISION=$SOURCE_COMMIT" \
             --build-arg "PACKAGING_REVISION=$GITHUB_SHA" \
             --file Dockerfile --tag "$CONTAINER_IMAGE" \
-            "$RUNNER_TEMP/unpacked/localpost_0.1.0_linux_$ARCHITECTURE"
+            "$RUNNER_TEMP/unpacked/localpost_0.2.0_linux_$ARCHITECTURE"
       - name: Qualify exact native image
         run: node scripts/qualify-container.mjs
       - name: Save exact tested image
@@ -89,7 +98,7 @@ jobs:
           overwrite: true
 
   publish:
-    if: inputs.promote_run_id == ''
+    if: inputs.publish && inputs.promote_run_id == ''
     needs: qualify
     runs-on: ubuntu-26.04
     timeout-minutes: 20
@@ -117,9 +126,9 @@ jobs:
         run: printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Publish exact tested platforms and guarded version index
         run: node scripts/publish-containers.mjs publish
-      - name: Expose version publication for public visibility setup
+      - name: Record version publication
         run: |
-          echo 'Version 0.1.0 is published. Ensure the localpost GHCR package is public while anonymous verification retries.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Version 0.2.0 is published to the public localpost GHCR package; anonymous verification follows.' >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/container-publication/publication.json" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -133,7 +142,7 @@ jobs:
         run: docker logout ghcr.io
 
   anonymous:
-    if: inputs.promote_run_id == ''
+    if: inputs.publish && inputs.promote_run_id == ''
     needs: publish
     strategy:
       fail-fast: false
@@ -196,7 +205,7 @@ jobs:
 
   promote:
     needs: [publish, anonymous]
-    if: always() && (inputs.promote_run_id != '' || (needs.publish.result == 'success' && needs.anonymous.result == 'success'))
+    if: always() && inputs.publish && (inputs.promote_run_id != '' || (needs.publish.result == 'success' && needs.anonymous.result == 'success'))
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:

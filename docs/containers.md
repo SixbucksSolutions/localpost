@@ -65,3 +65,35 @@ the same absolute path to the host agent. Do not infer this from Linux testing.
 
 localpost is MIT-licensed and provided as is without warranty. The recorded test
 matrix is evidence of the environments tested and carries no support commitment.
+
+
+## Qualification and publication
+
+The `Publish qualified containers` workflow defaults `publish` to `false`.
+That mode obtains the exact candidate artifact identified by
+`release/0.2.0-candidate.json`, verifies the archive and checksum-file hashes,
+and packages and tests each image on native Linux amd64 and arm64 runners.
+The retained `qualified-amd64` and `qualified-arm64` artifacts contain the
+exact tested images. Binary and packaged legal/API metadata are compared with
+the verified archives. Image labels distinguish the release source commit from
+the workflow packaging commit.
+
+The image declares UID/GID `65532:65532`. Qualification checks that image
+configuration and runs `--version` with the default user. Runtime delivery,
+private mailbox permissions, the API contract, port conflicts and graceful
+stop are tested with the host agent's UID/GID and a same-path private bind
+mount, as in the Linux example above. The host agent must be able to read its
+own `0700` mailboxes and `0600` delivered files.
+
+Publication requires an explicit `publish=true` dispatch, a manifest marked
+`publicationStatus=published`, and `qualification.status=passed`. The workflow
+loads the saved native images, checks their recorded identities, publishes a
+versioned multi-platform index, and verifies anonymous pulls and runtime
+behavior on both architectures before promoting `latest`. An existing
+`0.2.0` index must have the identical digest. The `0.1.0` tag is retained.
+
+If only the final promotion failed, dispatch the identical workflow revision
+with `publish=true` and `promote_run_id` set to that failed run. Recovery checks
+that both native qualifications, publication and both anonymous qualifications
+succeeded, then reuses their retained receipts without rebuilding images.
+Other failures require their failed workflow jobs to be retried and verified.
