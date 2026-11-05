@@ -204,3 +204,5 @@ concurrency qualification tests, plus a Linux race-instrumented CI run. Packagin
 and release-platform scope remain later work. The
 [browser pilot](../examples/browser-diagnostics/README.md) records its verified
 headless Chrome workflow; it does not establish cross-browser coverage.
+First-release targets and artifact/publication rules are proposed in
+[ADR 0008](adr/0008-first-release-scope.md); release qualification is still pending.
