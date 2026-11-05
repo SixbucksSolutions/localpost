@@ -1,5 +1,8 @@
 ﻿[CmdletBinding()]
-param([Parameter(Mandatory)][string]$PackageDirectory)
+param(
+    [Parameter(Mandatory)][string]$PackageDirectory,
+    [string]$InstallerPath = (Join-Path $PSScriptRoot 'install-service.ps1')
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $testIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -16,7 +19,8 @@ $listener.Start()
 $port = $listener.LocalEndpoint.Port
 $listener.Stop()
 $base = "http://127.0.0.1:$port/api/2026-11-05"
-$installer = Join-Path $PSScriptRoot 'install-service.ps1'
+$installer = (Resolve-Path -LiteralPath $InstallerPath).Path
+if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) { throw 'InstallerPath must identify an installer script.' }
 $args = @{ ServiceName = $name; InstallRoot = $install; MailboxRoot = $mailboxes }
 function Assert([bool]$Condition, [string]$Message) { if (-not $Condition) { throw $Message } }
 function Wait-Ready {
@@ -35,6 +39,8 @@ try {
     foreach ($sid in @('S-1-5-18', 'S-1-5-32-544')) {
         $rootAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid), 'FullControl', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
     }
+    # Canonical mailbox-path resolution needs read access to each ancestor.
+    $rootAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-19'), 'ReadAndExecute', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
     Set-Acl -LiteralPath $root -AclObject $rootAcl
     $unsafe = Join-Path $root 'untrusted-owner'
     New-Item -ItemType Directory -Path $unsafe | Out-Null

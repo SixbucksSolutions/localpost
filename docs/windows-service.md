@@ -36,7 +36,9 @@ that manifest and installer are part of the archive's trust boundary.
 SYSTEM and Administrators receive full control. LocalService receives read and
 execute access to code, Modify access to private rolling logs, and Modify access
 to the mailbox root. The designated agent account receives Modify access to the
-mailbox root. New mailbox directories and message files inherit those permissions.
+mailbox root. LocalService also needs read and traverse access to every
+existing ancestor of a custom mailbox root so canonical path resolution can
+complete. Provision those ancestor permissions before installation. New mailbox directories and message files inherit those permissions.
 The service keeps up to four rotated 1 MiB child-process log files for each output
 stream. WinSW also appends its own wrapper log. Inspect and archive that log
 during stopped-service maintenance. Elevated SCM command output is kept in a
