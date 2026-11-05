@@ -477,10 +477,10 @@ The public repository is [SixbucksSolutions/localpost](https://github.com/Sixbuc
 
 ## Valkey and Webdis adoption candidate
 
-An isolated in-memory candidate is under development; the released v0.2.1
+An isolated in-memory candidate has passed qualification. The released v0.2.1
 service above remains the current shared service. See the [candidate operations
 guide](docs/operations/valkey-webdis.md) for port 53170, native client semantics,
-and future qualification and cutover preparation. Build the unpublished `adoption-r1` bundle from reviewed, frozen HEAD with
+and cutover preparation. The [qualification receipt](docs/qualification/valkey-webdis-adoption-r1.md) links the exact tested bundle. Build the unpublished `adoption-r1` bundle from reviewed, frozen HEAD with
 `./scripts/build-adoption-candidate.ps1 -OutputDirectory <absolute-private-empty-folder>`.
 The builder checks reproducibility with two builds. Preserve the exact bundle
 for qualification under #0049. No shared-service cutover is authorized by this candidate

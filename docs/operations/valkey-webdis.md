@@ -7,6 +7,14 @@ the solution is locked and Terry separately authorizes the cutover. See the
 [client contract](../contracts/valkey-webdis.md) and
 [deployment profile](../../deploy/valkey-webdis/README.md).
 
+## Qualified candidate
+
+The [qualification receipt](https://github.com/SixbucksSolutions/localpost/blob/main/docs/qualification/valkey-webdis-adoption-r1.md) links
+the exact tested bundle from source `91f19e6` and records platform coverage.
+Use that artifact for
+review. Its frozen build manifest keeps the original pending status, while the
+separate receipt records completed qualification. Shared cutover remains deferred.
+
 ## Build the private candidate bundle
 
 Once the source is reviewed and frozen, build from a clean checkout of the
