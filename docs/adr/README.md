@@ -14,6 +14,7 @@ maintainer; it does not mean the behavior has been implemented or tested.
 | [0006](0006-go-implementation-language.md) | Implement localpost in Go | Accepted | 2026-11-04 |
 | [0007](0007-single-port-uuid-routing.md) | One listener with UUIDv4 registration routing | Accepted | 2026-11-04 |
 | [0008](0008-first-release-scope.md) | First-release scope, artifacts and publication gate | Accepted | 2026-11-04 |
+| [0009](0009-service-created-mailboxes.md) | Service-created UUIDv4 mailboxes and the 0.2.0 migration | Accepted for authorized implementation | 2026-11-05 |
 
 ## Open implementation decisions
 

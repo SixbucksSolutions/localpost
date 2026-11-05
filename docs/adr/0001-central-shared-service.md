@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Update:** per-registration listener/port details are superseded by [ADR 0007](0007-single-port-uuid-routing.md); the original decision below is retained as history.
+- **0.2.0 update:** directory allocation moves to the service under [ADR 0009](0009-service-created-mailboxes.md).
 - **Date:** 2026-11-04
 
 ## Context
