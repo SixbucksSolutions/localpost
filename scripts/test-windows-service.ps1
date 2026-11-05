@@ -83,12 +83,20 @@ try {
     Assert (Test-Path -LiteralPath $files[0].FullName) 'Retirement removed delivered data.'
     & node (Join-Path $PSScriptRoot 'test-windows-service-upload.mjs') --service-url "http://127.0.0.1:$port" --mailbox-root $mailboxes --installer $installer --service-name $name --install-root $install
     if ($LASTEXITCODE -ne 0) { throw 'Accepted-upload service stop check failed.' }
-    & $installer @args -Action Start
-    $restartRegistration = Wait-Ready
-    & $installer @args -Action Stop
     Assert (Test-Path -LiteralPath $files[0].FullName) 'Stop removed delivered data.'
     & $installer @args -Action Start
+    $restartRegistration = Wait-Ready
+    Assert (-not (Test-Path -LiteralPath $registration.directory)) 'Restart retained the retired mailbox.'
+    Assert (@(Get-ChildItem -LiteralPath $mailboxes -Force).Count -eq 1) 'Restart retained stale root entries.'
+    Invoke-WebRequest "$base/registrations/$($restartRegistration.id)/messages" -Method Post -ContentType 'application/octet-stream' -Body $payload -TimeoutSec 10 | Out-Null
+    $restartFiles = @(Get-ChildItem -LiteralPath $restartRegistration.directory -Filter 'localpost_*.dat')
+    Assert ($restartFiles.Count -eq 1) 'Expected one new delivery after restart.'
+    & $installer @args -Action Stop
+    Assert (Test-Path -LiteralPath $restartFiles[0].FullName) 'Stop removed delivered data.'
+    & $installer @args -Action Start
     $fresh = Wait-Ready
+    Assert (-not (Test-Path -LiteralPath $restartRegistration.directory)) 'Restart retained the previous mailbox.'
+    Assert (@(Get-ChildItem -LiteralPath $mailboxes -Force).Count -eq 1) 'Restart retained stale root entries.'
     Assert ($fresh.id -ne $restartRegistration.id) 'Restart reused registration ID.'
     try {
         Invoke-WebRequest "$base/registrations/$($restartRegistration.id)/messages" -Method Post -ContentType 'application/octet-stream' -Body $payload -TimeoutSec 10 | Out-Null
@@ -98,9 +106,12 @@ try {
     }
     & node (Join-Path $PSScriptRoot 'check-openapi-service.mjs') "http://127.0.0.1:$port" $mailboxes
     if ($LASTEXITCODE -ne 0) { throw 'Live OpenAPI check failed.' }
+    Invoke-WebRequest "$base/registrations/$($fresh.id)/messages" -Method Post -ContentType 'application/octet-stream' -Body $payload -TimeoutSec 10 | Out-Null
+    $freshFiles = @(Get-ChildItem -LiteralPath $fresh.directory -Filter 'localpost_*.dat')
+    Assert ($freshFiles.Count -eq 1) 'Expected one delivery before uninstall.'
     & $installer @args -Action Uninstall
-        Assert (Test-Path -LiteralPath $files[0].FullName) 'Uninstall removed delivered data.'
-    Write-Output 'PASS Windows SCM automatic configuration, LocalService delivery, inherited agent ACL, stop/restart, retirement, retained files, uninstall and live API contract. No OS reboot was performed.'
+    Assert (Test-Path -LiteralPath $freshFiles[0].FullName) 'Uninstall removed delivered data.'
+    Write-Output 'PASS Windows SCM automatic configuration, LocalService delivery, inherited agent ACL, stop/restart, retirement, startup cleanup, stop/uninstall retention and live API contract. No OS reboot was performed.'
 } catch {
     Get-CimInstance Win32_Service -Filter "Name='$name'" | Select-Object Name, State, StartMode, StartName, ExitCode | Format-List | Out-Host
     if (Test-Path -LiteralPath (Join-Path $install 'logs')) {

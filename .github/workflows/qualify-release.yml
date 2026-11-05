@@ -32,10 +32,10 @@ jobs:
           node --input-type=module <<'JS'
           import fs from 'node:fs';
           import assert from 'node:assert/strict';
-          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.1-candidate.json'));
           const version = JSON.parse(fs.readFileSync('openapi.json')).info.version;
           assert.equal(candidate.version, version);
-          assert.match(version, /^0\.2\.0$/);
+          assert.match(version, /^0\.2\.1$/);
           assert.equal(candidate.tag, `v${version}`);
           assert.match(candidate.sourceCommit, /^[0-9a-f]{40}$/);
           assert.equal(candidate.artifactName, `localpost-${version}-${candidate.sourceCommit}`);
@@ -69,7 +69,7 @@ jobs:
           import path from 'node:path';
           import assert from 'node:assert/strict';
           import { createHash } from 'node:crypto';
-          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.1-candidate.json'));
           const root = path.join(process.env.RUNNER_TEMP, 'candidate');
           const sums = fs.readFileSync(path.join(root, 'SHA256SUMS'), 'utf8');
           for (const asset of [...candidate.assets, candidate.checksumFile]) {

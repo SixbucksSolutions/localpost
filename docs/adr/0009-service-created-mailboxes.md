@@ -1,5 +1,6 @@
 # ADR 0009 — Service-created mailboxes for 0.2.0
 
+- **v0.2.1 update:** startup retention is superseded by [ADR 0011](0011-startup-mailbox-cleanup.md).
 - Status — Accepted for the authorized 0.2.0 implementation, pending verification
 - Date — 2026-11-05
 - Supersedes the caller-created directory responsibility in ADR 0001

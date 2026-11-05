@@ -341,7 +341,7 @@ func TestMessageIncompleteNotPublished(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, entry := range entries {
-			if strings.HasSuffix(entry.Name(), ".dat") {
+			if strings.HasPrefix(entry.Name(), "localpost_") && strings.HasSuffix(entry.Name(), ".dat") {
 				t.Fatal("incomplete body published")
 			}
 		}

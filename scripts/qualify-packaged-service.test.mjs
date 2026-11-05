@@ -19,9 +19,9 @@ async function fixture(t, host = process) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const packageTarget = `${host.platform === 'win32' ? 'windows' : host.platform}/${host.arch === 'x64' ? 'amd64' : host.arch}`;
   const architectureSettings = host.arch === 'arm64' ? { GOARM64: 'v8.0' } : { GOAMD64: 'v1' };
-  const manifest = { version: '0.2.0', sourceCommit: commit, target: packageTarget, toolchain: 'go1.27.3', binarySHA256: hash('test binary'), settings: { CGO_ENABLED: '0', ...architectureSettings, trimpath: 'true', buildvcs: 'false' } };
+  const manifest = { version: '0.2.1', sourceCommit: commit, target: packageTarget, toolchain: 'go1.27.3', binarySHA256: hash('test binary'), settings: { CGO_ENABLED: '0', ...architectureSettings, trimpath: 'true', buildvcs: 'false' } };
   await writeFile(path.join(directory, host.platform === 'win32' ? 'localpost.exe' : 'localpost'), 'test binary');
-  await writeFile(path.join(directory, 'openapi.json'), JSON.stringify({ info: { version: '0.2.0' } }));
+  await writeFile(path.join(directory, 'openapi.json'), JSON.stringify({ info: { version: '0.2.1' } }));
   const save = () => writeFile(path.join(directory, 'build-info.json'), JSON.stringify(manifest));
   await save();
   return { directory, manifest, save };
@@ -44,7 +44,7 @@ test('validates exact packaged identity before running absolute binary with an e
     assert.deepEqual(args, ['--version']);
     assert.equal(options.env.PATH, '');
     assert.ok(Object.entries(options.env).every(([key, value]) => key.toLowerCase() !== 'path' || value === ''));
-    return { stdout: `localpost 0.2.0 (commit ${commit}; go1.27.3; ${target})\n`, stderr: '' };
+    return { stdout: `localpost 0.2.1 (commit ${commit}; go1.27.3; ${target})\n`, stderr: '' };
   } });
   assert.equal(called, true);
   assert.equal(result.identity.binarySHA256, hash('test binary'));
@@ -71,7 +71,7 @@ for (const host of [{ platform: 'win32', arch: 'x64' }, { platform: 'linux', arc
     const { directory, manifest } = await fixture(t, host);
     const result = await inspectPackage({ packageDir: directory, expectedCommit: commit, host, run: async (command) => {
       assert.equal(command, path.join(directory, host.platform === 'win32' ? 'localpost.exe' : 'localpost'));
-      return { stdout: `localpost 0.2.0 (commit ${commit}; go1.27.3; ${manifest.target})\n`, stderr: '' };
+      return { stdout: `localpost 0.2.1 (commit ${commit}; go1.27.3; ${manifest.target})\n`, stderr: '' };
     } });
     assert.equal(result.identity.target, manifest.target);
   });
@@ -109,7 +109,7 @@ test('rejects ARM64 tuning in an AMD64 package before execution', async (t) => {
   await assert.rejects(inspectPackage({ packageDir: directory, expectedCommit: commit, host, run: () => assert.fail('Invalid package executed') }));
 });
 
-async function fakeServer(t, { premature = false, cleanupFails = false, responseDirectory } = {}) {
+async function fakeServer(t, { premature = false, cleanupFails = false, responseDirectory, temporaryName = '.localpost-upload-test.dat', extraName } = {}) {
   const mailboxRoot = await realpath(await mkdtemp(path.join(os.tmpdir(), 'localpost-probe-test-')));
   t.after(() => rm(mailboxRoot, { recursive: true, force: true }));
   const state = { directory: undefined, retired: 0 };
@@ -126,7 +126,7 @@ async function fakeServer(t, { premature = false, cleanupFails = false, response
       state.retired++;
       json(cleanupFails ? 500 : 200, { id, unregistered: true, forced: false });
     } else {
-      const temporary = path.join(state.directory, '.localpost-upload-test');
+      const temporary = path.join(state.directory, temporaryName);
       const chunks = [];
       let ended = false;
       let writing = Promise.resolve();
@@ -134,6 +134,7 @@ async function fakeServer(t, { premature = false, cleanupFails = false, response
         chunks.push(chunk);
         writing = writing.then(async () => {
           await writeFile(temporary, Buffer.concat(chunks));
+          if (extraName) await writeFile(path.join(state.directory, extraName), 'unexpected');
           if (premature) await writeFile(path.join(state.directory, delivered), Buffer.concat(chunks));
         });
       });
@@ -173,6 +174,22 @@ test('premature publication fails but still retires owned registration and clean
   assert.equal(state.retired, 1);
   await assert.rejects(access(state.directory), { code: 'ENOENT' });
 });
+
+test('rejects an active upload file without the .dat suffix and cleans its owned mailbox', async (t) => {
+  const { state, mailboxRoot, baseUrl } = await fakeServer(t, { temporaryName: '.localpost-upload-test' });
+  await assert.rejects(runPublicationProbe({ baseUrl, mailboxRoot }), /hidden \.dat file/);
+  assert.equal(state.retired, 1);
+  await assert.rejects(access(state.directory), { code: 'ENOENT' });
+});
+
+for (const extraName of ['unexpected-file', '.unexpected.dat']) {
+  test(`rejects unexpected active-upload entry ${extraName} and cleans its owned mailbox`, async (t) => {
+    const { state, mailboxRoot, baseUrl } = await fakeServer(t, { extraName });
+    await assert.rejects(runPublicationProbe({ baseUrl, mailboxRoot }), /Unexpected file during active upload/);
+    assert.equal(state.retired, 1);
+    await assert.rejects(access(state.directory), { code: 'ENOENT' });
+  });
+}
 
 test('failed retirement preserves owned inbox and returns private recovery context', async (t) => {
   const { state, mailboxRoot, baseUrl } = await fakeServer(t, { cleanupFails: true });

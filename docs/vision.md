@@ -57,7 +57,7 @@ for running the shared daemon. If it is unavailable, the agent reports that fact
 
 localpost does not provide application instrumentation, a browser driver,
 filesystem watchers, chat notifications, message interpretation, JSON schemas,
-retention policies, delivery-file deletion, automatic daemon startup by agents,
+configurable retention policies, automatic daemon startup by agents,
 or a production telemetry system.
 
 Authentication, TLS, origin allowlists, durable registration recovery, replay,

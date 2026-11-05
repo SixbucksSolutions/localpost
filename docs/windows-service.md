@@ -21,7 +21,10 @@ installation with its protected ownership record. Code directories and their
 ancestors must have trusted SYSTEM, Administrators or TrustedInstaller ownership
 and must prevent untrusted replacement. Missing ancestors are created with
 protected administrator ownership. Existing service names and an
-occupied port cause installation to stop. Existing mailbox contents are retained.
+occupied port cause installation to stop. Installation retains existing mailbox
+contents, but starting a v0.2.1 daemon deletes every child of the dedicated root
+before serving HTTP. The daemon reserves the port first. An occupied port fails
+before deletion. Back up needed data outside that root before starting.
 The installer replaces the mailbox root's explicit ACL with the private ACL
 below. Select a dedicated root whose access is owned by this installation.
 
@@ -39,8 +42,9 @@ to the mailbox root. The designated agent account receives Modify access to the
 mailbox root. LocalService also needs read and traverse access to every
 existing ancestor of a custom mailbox root so canonical path resolution can
 complete. Provision those ancestor permissions before installation. New mailbox directories and message files inherit those permissions.
-The service keeps up to four rotated 1 MiB child-process log files for each output
-stream. WinSW also appends its own wrapper log. Inspect and archive that log
+The external WinSW wrapper captures daemon console output in up to four rotated
+1 MiB child-process log files for each stream. WinSW also appends its own wrapper
+log. The daemon itself writes diagnostics only to its console streams. Inspect and archive that log
 during stopped-service maintenance. Elevated SCM command output is kept in a
 separate administrator-only `control-logs` directory.
 Logs and ownership metadata stay under the installation directory.
@@ -67,10 +71,14 @@ host migration, before installing on the same port.
 WinSW sends Ctrl+C to the daemon for graceful shutdown, with a 40-second stop
 budget. Windows shutdown must allow that budget. WinSW can terminate a process
 that exceeds it. Service failure triggers restart after 10 seconds. Registration
-IDs are in memory and become invalid after any restart, while delivered data
-remains on disk. Clients register again using `POST /api/2026-11-05/registrations`
+IDs are in memory and become invalid after any restart. Released v0.2.0 retains
+delivered data on restart. Development v0.2.1 warns when the dedicated root
+contains entries and deletes all root children before serving HTTP, including on
+automatic restart after failure. The root itself remains. Clients register again using `POST /api/2026-11-05/registrations`
 with JSON `{}` and use the returned `id` and `directory`. Retirement with `DELETE`
-retains files. Agents clean up only their own retired mailbox directories.
+retains files until the next v0.2.1 startup. Agents clean up only their own retired
+mailbox directories. The operator must ensure only one daemon uses a root, even
+across ports. The daemon does not lock the root.
 
 For failure diagnosis inspect `Get-Service localpost`, the Windows System event
 log, and the bounded logs under the installation directory. If installation stops
@@ -87,7 +95,8 @@ an elevated Windows session, Node, and the repository's `npm ci` dependencies.
 It uses a unique service, separate temporary directories and an available port.
 It checks SCM automatic-start configuration, LocalService identity, real
 service-written delivery files, inherited agent Modify permissions, dated API
-registration, stop/restart invalidation, retention, uninstall and the live OpenAPI
+registration, stop retention, restart invalidation and startup cleanup, uninstall,
+and the live OpenAPI
 contract. It cleans up only the owned test service and temporary directories.
 
 The `Windows service` workflow runs this test on `windows-2025` with a development

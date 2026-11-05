@@ -48,7 +48,10 @@ curl --fail-with-body -sS -X DELETE "$base/registrations/$id"
 ```
 
 Inspect and remove only the files and directory owned by the agent after
-retiring its registration. Delete and restart preserve directories and files.
+retiring its registration. With the published v0.2.0 image, delete and restart
+preserve directories and files. Development v0.2.1 deletes every child of its
+dedicated root at startup, including container restart; copy needed data outside
+the root first. The root itself remains.
 Registrations are in memory and must be created again after restart. Lost
 registration responses can leave orphaned directories that need retention and
 cleanup. Do not restart the shared service for each run.

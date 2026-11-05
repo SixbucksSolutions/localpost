@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish qualified v0.2.0 containers and promote latest
+        description: Publish qualified v0.2.1 containers and promote latest
         required: true
         type: boolean
         default: false
@@ -24,7 +24,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: publish-localpost-0.2.0
+  group: publish-localpost-0.2.1
   cancel-in-progress: false
 
 env:
@@ -69,10 +69,11 @@ jobs:
           docker buildx build --load --provenance=false --sbom=false \
             --platform "linux/$ARCHITECTURE" \
             --build-arg "SOURCE_DATE_EPOCH=$source_epoch" \
+            --build-arg "VERSION=$RELEASE_VERSION" \
             --build-arg "SOURCE_REVISION=$SOURCE_COMMIT" \
             --build-arg "PACKAGING_REVISION=$GITHUB_SHA" \
             --file Dockerfile --tag "$CONTAINER_IMAGE" \
-            "$RUNNER_TEMP/unpacked/localpost_0.2.0_linux_$ARCHITECTURE"
+            "$RUNNER_TEMP/unpacked/localpost_${RELEASE_VERSION}_linux_$ARCHITECTURE"
       - name: Qualify exact native image
         run: node scripts/qualify-container.mjs
       - name: Save exact tested image
@@ -144,7 +145,7 @@ jobs:
         run: node scripts/publish-containers.mjs publish
       - name: Record version publication
         run: |
-          echo 'Version 0.2.0 is published to the public localpost GHCR package; anonymous verification follows.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Version 0.2.1 is published to the public localpost GHCR package; anonymous verification follows.' >> "$GITHUB_STEP_SUMMARY"
           cat "$RUNNER_TEMP/container-publication/publication.json" >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:

@@ -85,6 +85,9 @@ func TestMessageStorageFailures(t *testing.T) {
 			var file *faultMessageFile
 			handler.storage.createTemp = func(dir, pattern string) (messageFile, error) {
 				creates++
+				if pattern != ".localpost-upload-*.dat" {
+					t.Errorf("upload staging must use a hidden .dat file: %q", pattern)
+				}
 				if tc.stage == "create" {
 					return nil, tc.failure
 				}

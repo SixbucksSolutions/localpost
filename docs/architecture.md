@@ -37,19 +37,23 @@ directory and its logical request-lifecycle state. The shared API creates and
 removes these mappings; registrations own no HTTP server or listening port.
 
 The listener binds to `127.0.0.1` and uses plain HTTP. The default port is `53147`;
-`--port` changes it. Startup binds the actual unprivileged port before announcing
-readiness. [ADR 0007](adr/0007-single-port-uuid-routing.md) records the cutover
+`--port` changes it. Startup reserves the unprivileged port before cleanup and
+announces readiness and serves HTTP only after cleanup. An occupied port
+fails before any root deletion. [ADR 0007](adr/0007-single-port-uuid-routing.md) records the cutover
 from the per-registration-port prototype.
 
 There is no daemon configuration file, persistent registry, or separate database.
 Active requests, the listener, and registrations necessarily have in-memory state;
 "stateless" here means none of that state is recovered after process restart.
-Delivered files belong to the agent and survive independently of the daemon.
+In released v0.2.0, delivered files survive daemon restarts. Development v0.2.1
+removes all children of its dedicated mailbox root at every startup before HTTP
+serving begins and warns when entries exist. The root itself remains. The operator must
+ensure only one daemon uses the root, even across ports. There is no root lock.
 
 ## Registration
 
 1. The operator provisions an existing absolute root and starts the daemon with
-   `--mailbox-root`. The service resolves and probes the root before listening.
+   `--mailbox-root`. The service reserves the port, resolves and cleans the root, then serves HTTP.
 2. The agent sends `{}` to `POST /api/2026-11-05/registrations`.
 3. localpost creates a new UUIDv4-named child and returns `id` and its absolute
    `directory`. The registration does not contain a process ID.
@@ -57,7 +61,8 @@ Delivered files belong to the agent and survive independently of the daemon.
 
 The control request is bounded to 64 KiB with a 30-second read budget. The
 filesystem operations have no deadline. The service never adopts an existing
-child. A successful startup probe does not guarantee later writes.
+child. The daemon does not write a startup probe. Cleanup, mailbox creation,
+and delivery can expose write failures.
 
 POSIX mailbox directories use `0700` and files use `0600`. The daemon and agent
 run under the same UID. Windows directories and files inherit the root ACL, which
@@ -77,7 +82,7 @@ media-type parameters. Both types use the same opaque-byte pipeline.
 
 1. Check HTTP framing and the accepted media type without interpreting the body.
 2. Receive the body with a 10 MiB limit and a 30-second stalled-upload timeout.
-3. Write the body bytes to a temporary file in the registration's directory.
+3. Write the body bytes to a hidden `.dat` staging file in the registration's directory.
 4. Close the complete file and publish a same-directory hard link named
    `localpost_[UUIDv7].dat`, without overwriting another delivery. Remove the
    temporary name on a best-effort basis after publication.
@@ -92,7 +97,11 @@ payload or the HTTP response, not injected into the stored content.
 Malformed, oversized, timed-out, disconnected, or failed writes must not publish
 a partial `.dat` file or return success. Temporary-file cleanup is best effort;
 a crash can leave temporary files. Agents ignore temporary names. Upload staging
-names use the `.localpost-upload-` prefix; the README records the error mapping.
+names use the `.localpost-upload-` prefix and `.dat` suffix. The README records
+the error mapping. The daemon writes only message `.dat` files for active
+registrations, including staging files containing only message bytes. It creates
+mailbox directories as needed but writes no probes, locks, metadata, state, or
+log files. Daemon diagnostics go to the console.
 
 UUIDv7 generation uses Go's standard `uuid` package. Publication requires a
 hard-link-capable filesystem. An unsupported link operation fails explicitly;
@@ -158,10 +167,12 @@ Forced interruption is bound to the admitted request's lifetime. Finished
 requests remove their interruption hooks before the connection can be reused,
 so an old registration cannot abort a later request for a different one.
 
-Unregistration does not delete the mailbox directory or completed files. A normal process stop likewise
-closes the listener with bounded network cleanup. A crash loses every registration while preserving directories and files;
-there is no restart recovery. Agents register again after a person restarts the
-daemon. Agents do not start it automatically or create a substitute collector.
+Unregistration does not delete the mailbox directory or completed files. A normal
+process stop closes the listener with bounded network cleanup. A crash loses every
+registration; there is no restart recovery. In development v0.2.1, the next
+startup removes every root child after either stop or crash. Agents register again
+after a person restarts the daemon. Agents do not start it automatically or create
+a substitute collector.
 
 An occupied shared port fails startup clearly. Bind failures, directory failures,
 and write failures are surfaced rather than silently changing the requested
@@ -182,8 +193,8 @@ immediate JSON `503` with `registration_limit` or `upload_limit`, not a queue.
 
 The resulting 160 MiB active-payload bound excludes retained deliveries, failed
 temporary cleanup, and other process memory. Progress may continue beyond one
-idle interval; admission capacity still applies. Localpost never removes
-delivered files to recover space. Disk exhaustion is a delivery failure.
+idle interval and admission capacity still applies. Localpost does not remove
+delivered files to recover space during a run. Disk exhaustion is a delivery failure.
 
 ## First implementation verification
 
@@ -196,7 +207,9 @@ The implementation should establish these properties before release:
 - Limit, timeout, disk-failure, and directory-loss cases cannot report false success.
 - CORS preflights and error responses work from an actual browser; preflights write no files.
 - Unregistration and process stop are bounded and preserve completed deliveries.
-- Restart restores no registrations; the listener stays unprivileged and loopback-only.
+- Restart restores no registrations; v0.2.1 startup clears the dedicated root
+  after reserving the port and before serving HTTP. An occupied port fails before
+  deletion. The listener stays unprivileged and loopback-only.
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
 concurrency qualification tests, plus a Linux race-instrumented CI run. Release

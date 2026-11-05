@@ -16,13 +16,13 @@ test('anonymous workflow job handles skipped qualification while requiring succe
   assert.equal(job[2].trim(), 'publish');
 });
 
-const reference = 'ghcr.io/sixbuckssolutions/localpost:0.2.0';
+const reference = 'ghcr.io/sixbuckssolutions/localpost:0.2.1';
 test('missing version permits only recognized manifest absence', () => {
   for (const stderr of [
     'ERROR: manifest unknown',
     'ERROR: MANIFEST_UNKNOWN: manifest unknown',
     `ERROR: ${reference}: not found`,
-    'unexpected status from HEAD request to https://ghcr.io/v2/sixbuckssolutions/localpost/manifests/0.2.0: 404 Not Found',
+    'unexpected status from HEAD request to https://ghcr.io/v2/sixbuckssolutions/localpost/manifests/0.2.1: 404 Not Found',
   ]) assert.equal(isMissingManifest({ stderr }, reference), true);
   for (const stderr of [
     'unauthorized: authentication required',
@@ -93,7 +93,7 @@ test('promotion resume requires an identical revision and fully verified source 
 
 
 test('publication requires explicit opt-in and the published qualified candidate', () => {
-  const candidate = { version: '0.2.0', publicationStatus: 'published', qualification: { status: 'passed' } };
+  const candidate = { version: '0.2.1', publicationStatus: 'published', qualification: { status: 'passed' } };
   checkPublicationPolicy(candidate, 'true');
   for (const optIn of [undefined, '', 'false', true]) assert.throws(() => checkPublicationPolicy(candidate, optIn));
   assert.throws(() => checkPublicationPolicy({ ...candidate, version: '0.1.0' }, 'true'));
@@ -175,7 +175,7 @@ test('retained image identity and labels bind to accepted packaging and source c
   const { packagingCommit, imageIds } = acceptedQualification;
   const sourceCommit = 'd'.repeat(40);
   const identity = { architecture: 'amd64', imageId: imageIds.amd64 };
-  const local = { Id: identity.imageId, Architecture: 'amd64', Os: 'linux', Config: { Labels: { 'org.opencontainers.image.version': '0.2.0', 'org.opencontainers.image.revision': sourceCommit, 'io.localpost.packaging-revision': packagingCommit } } };
+  const local = { Id: identity.imageId, Architecture: 'amd64', Os: 'linux', Config: { Labels: { 'org.opencontainers.image.version': '0.2.1', 'org.opencontainers.image.revision': sourceCommit, 'io.localpost.packaging-revision': packagingCommit } } };
   const check = (loaded = local, saved = identity, revision = packagingCommit, accepted = imageIds.amd64) => checkQualifiedImage(loaded, saved, 'amd64', revision, sourceCommit, accepted);
   check();
   for (const field of ['Id', 'Architecture', 'Os']) assert.throws(() => check({ ...local, [field]: 'wrong' }));
@@ -211,16 +211,16 @@ test('publication entry point loads retained images and exports their packaging 
     if (['load', 'tag', 'push', 'pull'].includes(args[0])) return { stdout: '' };
     if (args[0] === 'image' && args[1] === 'inspect') {
       const architecture = args[2].startsWith('localpost-qualified:') ? args[2].split(':').at(-1) : nativeArchitecture;
-      return { stdout: JSON.stringify([{ Id: acceptedQualification.imageIds[architecture], Architecture: architecture, Os: 'linux', RepoDigests: [`${repositoryImage}@${indexDigest}`], Config: { Labels: { 'org.opencontainers.image.version': '0.2.0', 'org.opencontainers.image.revision': sourceCommit, 'io.localpost.packaging-revision': acceptedQualification.packagingCommit } } }]) };
+      return { stdout: JSON.stringify([{ Id: acceptedQualification.imageIds[architecture], Architecture: architecture, Os: 'linux', RepoDigests: [`${repositoryImage}@${indexDigest}`], Config: { Labels: { 'org.opencontainers.image.version': '0.2.1', 'org.opencontainers.image.revision': sourceCommit, 'io.localpost.packaging-revision': acceptedQualification.packagingCommit } } }]) };
     }
     assert.deepEqual(args.slice(0, 2), ['buildx', 'imagetools']);
     if (args[2] === 'create') {
-      if (args[4] === `${repositoryImage}:0.2.0`) versionPublished = true;
+      if (args[4] === `${repositoryImage}:0.2.1`) versionPublished = true;
       return { stdout: '' };
     }
     assert.equal(args[2], 'inspect');
     const reference = args.at(-1);
-    if (reference === `${repositoryImage}:0.2.0` && !versionPublished) throw Object.assign(new Error('missing version'), { stderr: 'manifest unknown' });
+    if (reference === `${repositoryImage}:0.2.1` && !versionPublished) throw Object.assign(new Error('missing version'), { stderr: 'manifest unknown' });
     const architecture = reference.endsWith('-amd64') ? 'amd64' : reference.endsWith('-arm64') ? 'arm64' : undefined;
     const digest = architecture ? platformDigests[architecture] : indexDigest;
     return { stdout: args.includes('--raw') ? JSON.stringify(architecture ? { config: { digest: acceptedQualification.imageIds[architecture] } } : index) : `Digest: ${digest}` };
@@ -232,7 +232,7 @@ test('publication entry point loads retained images and exports their packaging 
     process.chdir(directory);
     Object.assign(process.env, { RUNNER_TEMP: directory, GITHUB_ENV: path.join(directory, 'environment'), GITHUB_SHA: '9'.repeat(40), GITHUB_RUN_ID: '999', QUALIFIED_RUN_ID: acceptedQualification.runId, PROMOTE_RUN_ID: '', PUBLISH_CONTAINERS: 'true', ARCHITECTURE: nativeArchitecture });
     await mkdir('release');
-    await writeFile('release/0.2.0-candidate.json', JSON.stringify({ version: '0.2.0', publicationStatus: 'published', qualification: { status: 'passed' }, sourceCommit, containerQualification: acceptedQualification }));
+    await writeFile('release/0.2.1-candidate.json', JSON.stringify({ version: '0.2.1', publicationStatus: 'published', qualification: { status: 'passed' }, sourceCommit, containerQualification: acceptedQualification }));
     for (const architecture of ['amd64', 'arm64']) {
       const qualified = path.join(directory, 'qualified', architecture);
       await mkdir(qualified, { recursive: true });
@@ -248,6 +248,7 @@ test('publication entry point loads retained images and exports their packaging 
     assert.equal(commands.filter((args) => args[0] === 'load').length, 2);
     assert.equal(commands.filter((args) => args[0] === 'push').length, 2);
     assert.equal(commands.some((args) => args.includes('build')), false);
+    assert.equal(commands.some((args) => args.includes(`${repositoryImage}:0.2.0`)), false, 'Published v0.2.0 tag must remain untouched');
     versionPublished = false;
     commands.length = 0;
     process.env.QUALIFIED_RUN_ID = '';

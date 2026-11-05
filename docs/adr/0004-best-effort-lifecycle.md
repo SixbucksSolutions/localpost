@@ -1,5 +1,6 @@
 # ADR 0004: Ephemeral registration and best-effort lifecycle
 
+- **v0.2.1 update:** startup retention is superseded by [ADR 0011](0011-startup-mailbox-cleanup.md).
 - **Status:** Accepted
 - **Date:** 2026-11-04
 

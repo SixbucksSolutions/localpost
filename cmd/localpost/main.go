@@ -58,6 +58,11 @@ func run(ctx context.Context, cfg config, output io.Writer) error {
 	}
 	// Closing an already stopped listener is best-effort cleanup.
 	defer func() { _ = listener.Close() }()
+	// Reserve the requested port before deleting anything. An occupied port
+	// rejects a duplicate launch without touching the running instance's files.
+	if err := clearMailboxRoot(root, output); err != nil {
+		return fmt.Errorf("mailbox root: %w", err)
+	}
 	// Losing a diagnostic output stream does not change listener ownership.
 	_, _ = fmt.Fprintf(output, "localpost listening on http://%s\n", listener.Addr())
 	return serve(ctx, listener, root)
@@ -158,7 +163,7 @@ func main() {
 	}
 	if err != nil {
 		// There is no secondary diagnostic channel if stderr is unavailable.
-		_, _ = fmt.Fprintf(os.Stderr, "localpost: %v\n", err)
+		_, _ = fmt.Fprintf(os.Stderr, "localpost: ERROR: %v\n", err)
 		os.Exit(1)
 	}
 }

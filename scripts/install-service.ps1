@@ -3,7 +3,7 @@ param(
     [ValidateSet('Install', 'Start', 'Stop', 'Uninstall')][string]$Action = 'Install',
     [string]$PackageDirectory = '',
     [ValidatePattern('^[A-Za-z][A-Za-z0-9_-]{0,63}$')][string]$ServiceName = 'localpost',
-    [string]$InstallRoot = "$env:ProgramFiles\localpost\0.2.0",
+    [string]$InstallRoot = "$env:ProgramFiles\localpost\0.2.1",
     [string]$MailboxRoot = "$env:ProgramData\localpost\mailboxes",
     [ValidateRange(1024, 65535)][int]$Port = 53147,
     [string]$AgentAccount = ([Security.Principal.WindowsIdentity]::GetCurrent().Name)
@@ -137,7 +137,7 @@ $agentSid = ([Security.Principal.NTAccount]::new($AgentAccount)).Translate([Secu
 $package = (Resolve-Path -LiteralPath $PackageDirectory).Path
 $binary = Join-Path $package 'localpost.exe'
 $manifest = Get-Content -LiteralPath (Join-Path $package 'build-info.json') -Raw | ConvertFrom-Json
-if ($manifest.version -ne '0.2.0' -or $manifest.target -ne 'windows/amd64' -or $manifest.sourceCommit -notmatch '^[a-f0-9]{40}$' -or $manifest.binarySHA256 -notmatch '^[a-f0-9]{64}$') { throw 'Expected a Windows amd64 0.2.0 release manifest.' }
+if ($manifest.version -ne '0.2.1' -or $manifest.target -ne 'windows/amd64' -or $manifest.sourceCommit -notmatch '^[a-f0-9]{40}$' -or $manifest.binarySHA256 -notmatch '^[a-f0-9]{64}$') { throw 'Expected a Windows amd64 0.2.1 release manifest.' }
 if ((Get-FileHash -LiteralPath $binary -Algorithm SHA256).Hash -ne $manifest.binarySHA256) { throw 'Release executable SHA-256 differs from build-info.json.' }
 if (Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue) { throw "Port $Port already has a listener." }
 function Set-PrivateAcl([string]$Path, [string]$ServiceRights, [bool]$IncludeAgent) {

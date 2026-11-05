@@ -24,24 +24,28 @@ assert.ok(image);
 assert.ok(['amd64', 'arm64'].includes(architecture));
 assert.equal(process.arch, architecture === 'amd64' ? 'x64' : 'arm64');
 assert.notEqual(process.getuid(), 0);
-const packageDir = path.join(process.env.RUNNER_TEMP, 'unpacked', `localpost_0.2.0_linux_${architecture}`);
+const packageDir = path.join(process.env.RUNNER_TEMP, 'unpacked', `localpost_0.2.1_linux_${architecture}`);
 const report = path.join(process.env.RUNNER_TEMP, 'container-evidence');
 await mkdir(report, { recursive: true });
 const root = await mkdtemp(path.join(os.tmpdir(), 'localpost-container-'));
 await chmod(root, 0o700);
+const mailboxRoot = path.join(root, 'mailboxes');
+const defaultRoot = path.join(root, 'default-mailboxes');
+await mkdir(mailboxRoot);
+await mkdir(defaultRoot);
 const containers = [];
 const prefix = `localpost-${process.pid}-${Date.now()}`;
-const candidate = JSON.parse(await readFile('release/0.2.0-candidate.json'));
+const candidate = JSON.parse(await readFile('release/0.2.1-candidate.json'));
 const expectedCommit = candidate.sourceCommit;
 assert.match(expectedCommit, /^[0-9a-f]{40}$/);
 const apiPrefix = '/api/2026-11-05';
 let phase = 'host-metadata';
 const send = (port, route, method, body) => requestBounded({ url: `http://127.0.0.1:${port}${route}`, method, body: body && Buffer.from(JSON.stringify(body)), headers: body ? { 'Content-Type': 'application/json' } : {}, timeoutMs: 5000 });
-const start = async (suffix, args = []) => {
+const start = async (suffix, args = [], serviceRoot = mailboxRoot) => {
   const name = `${prefix}-${suffix}`;
   containers.push(name);
   const user = ['--user', `${process.getuid()}:${process.getgid()}`];
-  await docker('run', '--detach', '--name', name, '--network', 'host', '--read-only', '--stop-timeout', '40', ...user, '--env', 'PATH=', '--env', `TMPDIR=${root}`, '--mount', `type=bind,source=${root},target=${root}`, image, '--mailbox-root', root, ...args);
+  await docker('run', '--detach', '--name', name, '--network', 'host', '--read-only', '--stop-timeout', '40', ...user, '--env', 'PATH=', '--env', `TMPDIR=${root}`, '--mount', `type=bind,source=${root},target=${root}`, image, '--mailbox-root', serviceRoot, ...args);
   return name;
 };
 const ready = async (port, name) => {
@@ -79,7 +83,7 @@ try {
   assert.equal(configuration.Config.User, '65532:65532');
   assert.equal(configuration.Config.StopSignal, 'SIGINT');
   const labels = configuration.Config.Labels;
-  assert.equal(labels['org.opencontainers.image.version'], '0.2.0');
+  assert.equal(labels['org.opencontainers.image.version'], '0.2.1');
   assert.equal(labels['org.opencontainers.image.revision'], expectedCommit);
   assert.equal(labels['org.opencontainers.image.source'], 'https://github.com/SixbucksSolutions/localpost');
   assert.equal(labels['org.opencontainers.image.licenses'], 'MIT');
@@ -106,7 +110,7 @@ try {
   phase = 'default-user-version';
   const versionContainer = `${prefix}-version`;
   containers.push(versionContainer);
-  assert.equal(await docker('run', '--rm', '--name', versionContainer, '--read-only', '--network', 'none', image, '--version'), `localpost 0.2.0 (commit ${expectedCommit}; go1.27.3; linux/${architecture})`);
+  assert.equal(await docker('run', '--rm', '--name', versionContainer, '--read-only', '--network', 'none', image, '--version'), `localpost 0.2.1 (commit ${expectedCommit}; go1.27.3; linux/${architecture})`);
   phase = 'isolated-port-check';
   for (const port of [53147, 53151, 53152]) {
     let occupied = false;
@@ -115,13 +119,15 @@ try {
   }
   phase = 'full-contract';
   const override = await start('override', ['--port', '53151']);
-  const defaultPort = await start('default-port');
+  const defaultPort = await start('default-port', [], defaultRoot);
   await ready(53151, override);
   await ready(53147, defaultPort);
   for (const [port, args] of [[53147, []], [53151, ['--port', '53151']]]) {
     const name = `${prefix}-conflict-${port}`;
     containers.push(name);
-    await assert.rejects(docker('run', '--name', name, '--network', 'host', '--read-only', '--user', `${process.getuid()}:${process.getgid()}`, '--mount', `type=bind,source=${root},target=${root}`, image, '--mailbox-root', root, ...args));
+    const conflictRoot = path.join(root, `conflict-${port}`);
+    await mkdir(conflictRoot);
+    await assert.rejects(docker('run', '--name', name, '--network', 'host', '--read-only', '--user', `${process.getuid()}:${process.getgid()}`, '--mount', `type=bind,source=${root},target=${root}`, image, '--mailbox-root', conflictRoot, ...args));
     assert.notEqual(await docker('inspect', '--format', '{{.State.ExitCode}}', name), '0');
     const logs = await execute('docker', ['logs', name], { timeout: 5000, maxBuffer: 16384 });
     assert.ok((logs.stdout + logs.stderr).includes(`127.0.0.1:${port}`));
@@ -129,13 +135,13 @@ try {
   const previousTmp = process.env.TMPDIR;
   process.env.TMPDIR = root;
   let qualification;
-  try { qualification = await qualifyPackage({ packageDir, baseUrl: 'http://127.0.0.1:53151', expectedCommit, mailboxRoot: root }); }
+  try { qualification = await qualifyPackage({ packageDir, baseUrl: 'http://127.0.0.1:53151', expectedCommit, mailboxRoot }); }
   finally { if (previousTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = previousTmp; }
   phase = 'docker-stop-admitted-upload';
   const registration = await send(53151, `${apiPrefix}/registrations`, 'POST', {});
   assert.equal(registration.status, 200);
   const { id: shutdownId, directory: shutdownDirectory } = JSON.parse(registration.body);
-  assert.equal(shutdownDirectory, path.join(root, shutdownId));
+  assert.equal(shutdownDirectory, path.join(mailboxRoot, shutdownId));
   const directoryStat = await stat(shutdownDirectory);
   assert.equal(directoryStat.uid, process.getuid());
   assert.equal(directoryStat.mode & 0o777, 0o700);
@@ -166,9 +172,28 @@ try {
   assert.equal(deliveredStat.uid, process.getuid());
   assert.equal(deliveredStat.mode & 0o777, 0o600);
   assert.deepEqual(await readdir(shutdownDirectory), [shutdownReceipt.filename]);
+  phase = 'container-normal-restart';
+  const restarted = await start('restarted', ['--port', '53151']);
+  await ready(53151, restarted);
+  assert.deepEqual(await readdir(mailboxRoot), [], 'Container restart retained previous mailbox bytes');
+  const restartLogs = await execute('docker', ['logs', restarted], { timeout: 5000, maxBuffer: 16384 });
+  assert.match(restartLogs.stdout + restartLogs.stderr, /WARNING/);
+  phase = 'container-crash-restart';
+  const crashDirectory = path.join(mailboxRoot, 'crash-stale-directory');
+  await mkdir(crashDirectory);
+  await writeFile(path.join(crashDirectory, 'stale.dat'), 'crash bytes');
+  await docker('kill', '--signal', 'KILL', restarted);
+  assert.equal(await readFile(path.join(crashDirectory, 'stale.dat'), 'utf8'), 'crash bytes');
+  const crashRestarted = await start('crash-restarted', ['--port', '53151']);
+  await ready(53151, crashRestarted);
+  assert.deepEqual(await readdir(mailboxRoot), [], 'Container crash restart retained mailbox bytes');
+  const crashLogs = await execute('docker', ['logs', crashRestarted], { timeout: 5000, maxBuffer: 16384 });
+  assert.match(crashLogs.stdout + crashLogs.stderr, /WARNING/);
+  await docker('stop', crashRestarted);
   await docker('stop', defaultPort);
-  for (const name of [override, defaultPort]) assert.equal(await docker('inspect', '--format', '{{.State.ExitCode}}', name), '0');
-  await writeFile(path.join(report, 'qualification.json'), JSON.stringify({ passed: true, host, imageId: configuration.Id, architecture, labels, qualification, defaultUserVersion: true, runtimeUser: process.getuid(), mailboxRootMode: '0700', portsAndConflicts: true, dockerStopAdmittedUpload: true, persistedBytes: prefixBytes.length + tail.length }, null, 2));
+  for (const name of [override, defaultPort, crashRestarted]) assert.equal(await docker('inspect', '--format', '{{.State.ExitCode}}', name), '0');
+  assert.equal(await docker('inspect', '--format', '{{.State.ExitCode}}', restarted), '137');
+  await writeFile(path.join(report, 'qualification.json'), JSON.stringify({ passed: true, host, imageId: configuration.Id, architecture, labels, qualification, defaultUserVersion: true, runtimeUser: process.getuid(), mailboxRootMode: '0700', portsAndConflicts: true, dockerStopAdmittedUpload: true, retainedUntilRestartBytes: prefixBytes.length + tail.length, containerRestartPurged: true, containerCrashRestartPurged: true }, null, 2));
   console.log('Container qualification passed.');
 } catch (error) {
   // This isolated CI harness invokes only fixed commands with owned paths and synthetic payloads.

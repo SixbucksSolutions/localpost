@@ -45,7 +45,7 @@ type manifest struct {
 }
 
 func main() {
-	version := flag.String("version", "", "release version (for example 0.2.0)")
+	version := flag.String("version", "", "release version (for example 0.2.1)")
 	output := flag.String("output", "", "new or empty candidate output directory")
 	sourceRef := flag.String("source-ref", "HEAD", "Git source revision to archive")
 	targets := flag.String("targets", "windows/amd64,linux/amd64,linux/arm64", "comma-separated package targets")
@@ -501,7 +501,13 @@ required to run this executable.
 
 Unpack the whole archive into a new directory. Run as an ordinary user:
 
-Create an absolute mailbox root writable by the daemon user first. Then run:
+Create a dedicated absolute mailbox root writable by the daemon user first.
+WARNING: Every startup recursively deletes all existing entries in that root
+after binding the requested port and before accepting HTTP requests, including
+after an unclean exit. Keep only
+disposable localpost data there. Copy needed deliveries outside the root before
+restarting. Operators coordinate instances and root selection themselves,
+including instances on different ports that share a root. Then run:
 
 Windows (PowerShell): .\localpost.exe --mailbox-root C:\localpost-mailboxes
 Windows automatic service: see docs/windows-service.md and run the packaged
@@ -509,7 +515,7 @@ scripts/install-service.ps1 from an elevated PowerShell session.
 Linux: ./localpost --mailbox-root /absolute/path/to/localpost-mailboxes
 
 The default address is http://127.0.0.1:53147. Use --port 53148 to select another
-port. An occupied port causes startup to fail. Use --version to inspect the
+port. An occupied port causes startup to fail before mailbox cleanup. Use --version to inspect the
 version, source commit, toolchain and target without starting the listener.
 Stop with Ctrl+C (SIGINT). Shutdown stops new work and permits a network grace
 period up to 30 seconds; filesystem operations do not have a hard time limit.
@@ -521,7 +527,12 @@ identify a newly created mailbox beneath the configured root. POST opaque bytes
 to /api/2026-11-05/registrations/{id}/messages to deliver one complete
 localpost_[UUIDv7].dat file. DELETE /api/2026-11-05/registrations/{id} when finished.
 Registrations exist only in memory and must be recreated after a restart.
-Delivered files are preserved. See openapi.json for errors and limits.
+Unregistering preserves delivered files until the next startup cleans the root.
+The daemon writes only message .dat files for active registrations, including
+hidden staging .dat files while uploads are in progress. Diagnostic output uses
+standard streams. The optional Windows service wrapper separately owns its
+installation metadata and captured-output logs. See openapi.json for errors
+and limits.
 
 The listener is loopback-only, with permissive CORS and no authentication. Any
 local process or browser page may call it. Keep the mailbox root private;
@@ -529,12 +540,14 @@ do not expose it through a public proxy or bind it to external interfaces.
 
 ## Upgrade and rollback
 
-Coordinate active clients and unregister their mailboxes. Stop the old process
+Coordinate active clients, copy needed deliveries outside the mailbox root, and
+unregister their mailboxes. Stop the old process
 and wait for exit. Retain its executable/archive and checksum for rollback.
 Unpack the new version into a separate directory; never overwrite a running
 executable. Start it on the intended port and verify readiness before clients
 register again. Rollback means stopping the new process, starting the retained
-version and creating fresh registrations. Neither action removes delivered files.
+version and creating fresh registrations. Starting v0.2.1 deletes existing root
+entries before serving requests, including when starting it during rollback.
 
 Verify archive SHA-256 against SHA256SUMS before use. The accompanying release
 records good-faith testing. This MIT-licensed software is provided as is without

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { link, lstat, readFile, readdir, realpath, rm, stat, statfs, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, statfs, writeFile } from 'node:fs/promises';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -46,7 +47,7 @@ export async function inspectPackage({ packageDir, expectedCommit, run = execute
   const document = JSON.parse(contractBytes);
   const target = `${host.platform === 'win32' ? 'windows' : host.platform}/${host.arch === 'x64' ? 'amd64' : host.arch}`;
   assert.ok(['windows/amd64', 'linux/amd64', 'linux/arm64'].includes(target), 'Unsupported qualification host');
-  assert.equal(manifest.version, '0.2.0');
+  assert.equal(manifest.version, '0.2.1');
   assert.equal(manifest.sourceCommit, expectedCommit);
   assert.equal(manifest.target, target);
   assert.equal(manifest.toolchain, 'go1.27.3');
@@ -55,7 +56,7 @@ export async function inspectPackage({ packageDir, expectedCommit, run = execute
   assert.equal(manifest.settings?.GOARM64, host.arch === 'arm64' ? 'v8.0' : undefined);
   assert.equal(manifest.settings?.trimpath, 'true');
   assert.equal(manifest.settings?.buildvcs, 'false');
-  assert.equal(document.info.version, '0.2.0');
+  assert.equal(document.info.version, '0.2.1');
   const binaryName = host.platform === 'win32' ? 'localpost.exe' : 'localpost';
   const binaryBytes = await read(binaryName);
   assert.match(manifest.binarySHA256, /^[0-9a-f]{64}$/);
@@ -64,7 +65,7 @@ export async function inspectPackage({ packageDir, expectedCommit, run = execute
   env.PATH = '';
   const result = await run(path.join(root, binaryName), ['--version'], { env, cwd: root, timeout: timeoutMs, maxBuffer: 4096, windowsHide: true });
   assert.equal(result.stderr, '', 'Version command wrote stderr');
-  assert.equal(result.stdout.trim(), `localpost 0.2.0 (commit ${expectedCommit}; go1.27.3; ${manifest.target})`);
+  assert.equal(result.stdout.trim(), `localpost 0.2.1 (commit ${expectedCommit}; go1.27.3; ${manifest.target})`);
   return { document, identity: { version: manifest.version, sourceCommit: expectedCommit, target: manifest.target, toolchain: manifest.toolchain, binarySHA256: manifest.binarySHA256, manifestSHA256: digest(manifestBytes), openapiSHA256: digest(contractBytes), versionWithEmptyPath: true } };
 }
 
@@ -160,11 +161,18 @@ export async function runPublicationProbe({ baseUrl, mailboxRoot, request = requ
     await rm(source);
     const published = [sentinelName];
     const observe = async () => {
+      let stagingName;
       await waitFor(async () => {
         const temporary = await temporaryNames();
-        return temporary.length === 1 && (await stat(path.join(directory, temporary[0]))).size > 0;
+        assert.ok(temporary.length <= 1, 'More than one active upload file');
+        if (temporary.length === 0) return false;
+        stagingName = temporary[0];
+        assert.match(stagingName, /^\.localpost-upload-.+\.dat$/, 'Active upload must use a hidden .dat file');
+        const staging = await lstat(path.join(directory, stagingName));
+        assert.ok(staging.isFile(), 'Active upload must be a regular file');
+        return staging.size > 0;
       });
-      assert.deepEqual((await names()).filter((name) => name.endsWith('.dat')), [...published].sort(), 'Incomplete upload was published');
+      assert.deepEqual(await names(), [...published, stagingName].sort(), 'Unexpected file during active upload');
       assert.deepEqual(await readRegularFileBounded(path.join(directory, sentinelName), sentinel.length), sentinel);
     };
     requests++;
@@ -209,11 +217,105 @@ export async function runPublicationProbe({ baseUrl, mailboxRoot, request = requ
   return { ...result, requests, cleanupComplete: true };
 }
 
+// Use only a newly allocated private root. Startup deliberately destroys its contents.
+export async function runStartupProbe({ packageDir }) {
+  const owned = await realpath(await mkdtemp(path.join(os.tmpdir(), 'localpost-startup-')));
+  const root = path.join(owned, 'mailboxes');
+  await mkdir(root);
+  const executable = path.join(await realpath(packageDir), process.platform === 'win32' ? 'localpost.exe' : 'localpost');
+  const children = [];
+  const freePort = () => new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+  const launch = (port) => {
+    const child = spawn(executable, ['--mailbox-root', root, '--port', String(port)], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const state = { child, output: '', exited: false };
+    const capture = (chunk) => {
+      state.output = (state.output + chunk.toString()).slice(0, 32769);
+      if (state.output.length > 32768) child.kill('SIGKILL');
+    };
+    child.stdout.on('data', capture);
+    child.stderr.on('data', capture);
+    state.exit = new Promise((resolve, reject) => {
+      child.once('error', (error) => { state.exited = true; reject(error); });
+      child.once('exit', (code, signal) => { state.exited = true; resolve({ code, signal }); });
+    });
+    state.exit.catch(() => {});
+    children.push(state);
+    return state;
+  };
+  const stop = async (state, signal) => {
+    state.child.kill(signal);
+    await waitFor(() => state.exited);
+    return state.exit;
+  };
+  const ready = async (state, port) => {
+    await waitFor(async () => {
+      assert.equal(state.exited, false, 'Packaged process exited before readiness');
+      try { await requestBounded({ url: `http://127.0.0.1:${port}/`, method: 'GET', timeoutMs: 100 }); }
+      catch { return false; }
+      assert.deepEqual(await readdir(root), [], 'Listener accepted requests before startup cleanup completed');
+      return true;
+    });
+    await waitFor(() => state.output.includes('localpost listening'));
+    assert.match(state.output, /WARNING/);
+    assert.ok(state.output.indexOf('WARNING') < state.output.indexOf('localpost listening'), 'Warning must precede readiness');
+  };
+  const stale = async () => {
+    const directory = path.join(root, 'stale-directory', 'nested');
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, 'stale.dat'), Buffer.from([0, 255, 128]));
+    await writeFile(path.join(root, 'stray-file'), 'stale bytes');
+  };
+  try {
+    const port = await freePort();
+    await stale();
+    let active = launch(port);
+    await ready(active, port);
+    const response = await requestBounded({ url: `http://127.0.0.1:${port}${apiPrefix}/registrations`, method: 'POST', headers: { 'Content-Type': 'application/json' }, body: Buffer.from('{}') });
+    assert.equal(response.status, 200);
+    const registration = JSON.parse(response.body);
+    assert.match(registration.id, uuid);
+    assert.equal(registration.directory, path.join(root, registration.id));
+    const retained = path.join(root, registration.id, 'live.dat');
+    const bytes = Buffer.from([0, 255, 13, 10]);
+    await writeFile(retained, bytes);
+    await stop(active, 'SIGKILL');
+    assert.deepEqual(await readFile(retained), bytes, 'Crash unexpectedly erased retained bytes');
+    await stale();
+    active = launch(port);
+    await ready(active, port);
+    const obsolete = await requestBounded({ url: `http://127.0.0.1:${port}${apiPrefix}/registrations/${registration.id}/messages`, method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
+    assert.equal(obsolete.status, 404);
+    assert.equal(JSON.parse(obsolete.body).error.code, 'registration_not_found');
+    await stale();
+    const graceful = process.platform !== 'win32';
+    const stopped = await stop(active, graceful ? 'SIGINT' : 'SIGKILL');
+    if (graceful) assert.equal(stopped.code, 0, 'Normal shutdown failed');
+    assert.deepEqual(await readFile(path.join(root, 'stray-file')), Buffer.from('stale bytes'), 'Shutdown should retain files until next startup');
+    active = launch(port);
+    await ready(active, port);
+    await stop(active, 'SIGKILL');
+    return { warningBeforeReadiness: true, rootEmptyAtFirstReadiness: true, crashRestartPurged: true, oldRegistrationInvalidated: true, normalRestartPurged: graceful, windowsTerminationRestartPurged: !graceful };
+  } finally {
+    for (const state of children) if (!state.exited) await stop(state, 'SIGKILL');
+    assert.equal(path.dirname(root), owned);
+    assert.equal(await realpath(owned), owned);
+    await rm(owned, { recursive: true, force: true });
+  }
+}
+
 export async function qualifyPackage(options) {
   const { document, identity } = await inspectPackage(options);
   const contract = await runServiceCheck({ baseUrl: options.baseUrl, document, mailboxRoot: options.mailboxRoot });
   const publication = await runPublicationProbe({ baseUrl: options.baseUrl, mailboxRoot: options.mailboxRoot });
-  return { schemaVersion: 1, passed: true, host: { platform: process.platform, architecture: process.arch, release: os.release(), version: os.version() }, identity, contract, publication, lifecycle: 'Caller must independently verify packaged-daemon startup, port ownership and SIGINT shutdown.' };
+  const startup = await runStartupProbe(options);
+  return { schemaVersion: 1, passed: true, host: { platform: process.platform, architecture: process.arch, release: os.release(), version: os.version() }, identity, contract, publication, startup, lifecycle: 'Caller must independently verify the primary packaged-daemon port ownership and platform shutdown.' };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

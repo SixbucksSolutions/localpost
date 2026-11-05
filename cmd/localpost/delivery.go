@@ -117,7 +117,7 @@ func (h *messageHandler) ServeHTTP(w http.ResponseWriter, request *http.Request)
 		return
 	}
 
-	file, err := h.storage.createTemp(h.directory, ".localpost-upload-*")
+	file, err := h.storage.createTemp(h.directory, ".localpost-upload-*.dat")
 	if err != nil {
 		abortMessageBody(w, controller)
 		writeAPIError(w, http.StatusInternalServerError, "delivery_failed", "unable to create message file")

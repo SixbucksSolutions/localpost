@@ -55,9 +55,9 @@ jobs:
           $package = Join-Path $env:RUNNER_TEMP 'localpost-service-package'
           New-Item -ItemType Directory -Path "$package/docs" -Force | Out-Null
           $env:CGO_ENABLED = '0'
-          go build -trimpath -buildvcs=false -ldflags "-X main.releaseVersion=0.2.0 -X main.sourceCommit=$env:GITHUB_SHA" -o "$package/localpost.exe" ./cmd/localpost
+          go build -trimpath -buildvcs=false -ldflags "-X main.releaseVersion=0.2.1 -X main.sourceCommit=$env:GITHUB_SHA" -o "$package/localpost.exe" ./cmd/localpost
           if ($LASTEXITCODE -ne 0) { throw 'Fixture build failed.' }
-          @{version='0.2.0'; target='windows/amd64'; sourceCommit=$env:GITHUB_SHA; binarySHA256=(Get-FileHash "$package/localpost.exe").Hash.ToLowerInvariant()} | ConvertTo-Json | Set-Content "$package/build-info.json"
+          @{version='0.2.1'; target='windows/amd64'; sourceCommit=$env:GITHUB_SHA; binarySHA256=(Get-FileHash "$package/localpost.exe").Hash.ToLowerInvariant()} | ConvertTo-Json | Set-Content "$package/build-info.json"
           Copy-Item docs/windows-service.md "$package/docs/windows-service.md"
           "SERVICE_PACKAGE=$package" >> $env:GITHUB_ENV
           "SERVICE_INSTALLER=$env:GITHUB_WORKSPACE/scripts/install-service.ps1" >> $env:GITHUB_ENV
@@ -71,17 +71,17 @@ jobs:
           @'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
-          assert.equal(candidate.version, '0.2.0');
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.1-candidate.json'));
+          assert.equal(candidate.version, '0.2.1');
           assert.equal(candidate.apiVersion, '2026-11-05');
-          assert.equal(candidate.tag, 'v0.2.0');
+          assert.equal(candidate.tag, 'v0.2.1');
           assert.match(candidate.sourceCommit, /^[0-9a-f]{40}$/);
           assert.ok(['candidate', 'published'].includes(candidate.publicationStatus));
-          assert.equal(candidate.artifactName, `localpost-0.2.0-${candidate.sourceCommit}`);
+          assert.equal(candidate.artifactName, `localpost-0.2.1-${candidate.sourceCommit}`);
           for (const id of [candidate.artifactId, candidate.artifactRunId]) assert.ok(Number.isSafeInteger(id) && id > 0);
           const windows = candidate.assets.filter(asset => asset.target === 'windows/amd64');
           assert.equal(windows.length, 1);
-          assert.equal(windows[0].name, 'localpost_0.2.0_windows_amd64.zip');
+          assert.equal(windows[0].name, 'localpost_0.2.1_windows_amd64.zip');
           assert.equal(candidate.checksumFile.name, 'SHA256SUMS');
           for (const asset of [windows[0], candidate.checksumFile]) assert.match(asset.sha256, /^[0-9a-f]{64}$/);
           if (candidate.publicationStatus !== 'published') {
@@ -113,14 +113,14 @@ jobs:
         run: |
           $destination = Join-Path $env:RUNNER_TEMP 'candidate'
           New-Item -ItemType Directory -Path $destination | Out-Null
-          foreach ($name in @('localpost_0.2.0_windows_amd64.zip', 'SHA256SUMS')) {
-            Invoke-WebRequest "https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/$name" -OutFile (Join-Path $destination $name) -TimeoutSec 60
+          foreach ($name in @('localpost_0.2.1_windows_amd64.zip', 'SHA256SUMS')) {
+            Invoke-WebRequest "https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.1/$name" -OutFile (Join-Path $destination $name) -TimeoutSec 60
           }
       - name: Verify and unpack exact Windows package
         if: inputs.use_candidate == true
         shell: pwsh
         run: |
-          $candidate = Get-Content release/0.2.0-candidate.json -Raw | ConvertFrom-Json
+          $candidate = Get-Content release/0.2.1-candidate.json -Raw | ConvertFrom-Json
           $download = Join-Path $env:RUNNER_TEMP 'candidate'
           $asset = @($candidate.assets | Where-Object target -eq 'windows/amd64')[0]
           foreach ($file in @($asset, $candidate.checksumFile)) {
@@ -132,18 +132,18 @@ jobs:
           $zip = [IO.Compression.ZipFile]::OpenRead($archivePath)
           try {
             foreach ($entry in $zip.Entries) {
-              if (-not $entry.FullName.StartsWith('localpost_0.2.0_windows_amd64/', [StringComparison]::Ordinal) -or $entry.FullName.Contains('\') -or $entry.FullName.Split('/') -contains '..') { throw 'Unsafe Windows archive member.' }
+              if (-not $entry.FullName.StartsWith('localpost_0.2.1_windows_amd64/', [StringComparison]::Ordinal) -or $entry.FullName.Contains('\') -or $entry.FullName.Split('/') -contains '..') { throw 'Unsafe Windows archive member.' }
             }
           } finally { $zip.Dispose() }
           $unpacked = Join-Path $env:RUNNER_TEMP 'exact-windows-package'
           Expand-Archive -LiteralPath $archivePath -DestinationPath $unpacked
-          $package = Join-Path $unpacked 'localpost_0.2.0_windows_amd64'
+          $package = Join-Path $unpacked 'localpost_0.2.1_windows_amd64'
           $env:SERVICE_PACKAGE = $package
           @'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           import { inspectPackage } from './scripts/qualify-packaged-service.mjs';
-          const candidate = JSON.parse(fs.readFileSync('release/0.2.0-candidate.json'));
+          const candidate = JSON.parse(fs.readFileSync('release/0.2.1-candidate.json'));
           const result = await inspectPackage({ packageDir: process.env.SERVICE_PACKAGE, expectedCommit: candidate.sourceCommit });
           assert.equal(result.identity.target, 'windows/amd64');
           console.log(`Verified exact Windows package for ${result.identity.sourceCommit}, including executable --version.`);

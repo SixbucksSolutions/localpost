@@ -16,6 +16,7 @@ maintainer; it does not mean the behavior has been implemented or tested.
 | [0008](0008-first-release-scope.md) | First-release scope, artifacts and publication gate | Accepted | 2026-11-04 |
 | [0009](0009-service-created-mailboxes.md) | Service-created UUIDv4 mailboxes and the 0.2.0 migration | Accepted for authorized implementation | 2026-11-05 |
 | [0010](0010-date-versioned-api.md) | Explicit date-versioned API paths and retired-version errors | Accepted for authorized implementation | 2026-11-05 |
+| [0011](0011-startup-mailbox-cleanup.md) | Clear the dedicated mailbox root on startup | Accepted for authorized implementation | 2026-11-05 |
 
 ## Open implementation decisions
 
@@ -23,7 +24,8 @@ These are not additional accepted requirements:
 
 - First-release packaging and target qualification followed
   [ADR 0008](0008-first-release-scope.md). The published v0.1.0 release has
-  recorded qualification. The v0.2.0 candidate requires its own qualification.
+  recorded qualification, as does the published v0.2.0 release. The v0.2.1
+  candidate requires its own qualification.
   Development uses Go 1.27.3 as recorded in `.go-version` and the README.
 - Remaining API refinements follow the dated routes and contract in
   [ADR 0010](0010-date-versioned-api.md) and the README.

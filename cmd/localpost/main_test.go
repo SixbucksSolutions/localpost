@@ -8,6 +8,9 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -66,14 +69,55 @@ func TestRunOccupiedPort(t *testing.T) {
 		t.Fatal("listener did not provide a TCP address")
 	}
 	port := address.Port
+	root := t.TempDir()
+	mailbox := filepath.Join(root, "active-mailbox")
+	if err := os.Mkdir(mailbox, 0700); err != nil {
+		t.Fatal(err)
+	}
+	message := filepath.Join(mailbox, "localpost_existing.dat")
+	if err := os.WriteFile(message, []byte("preserved live message"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	var output bytes.Buffer
-	err := run(context.Background(), config{port: port, mailboxRoot: t.TempDir()}, &output)
+	err := run(context.Background(), config{port: port, mailboxRoot: root}, &output)
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1:"+strconv.Itoa(port)) {
 		t.Fatalf("occupied port must identify failed address: %v", err)
 	}
 	if output.Len() != 0 {
 		t.Fatalf("failed startup announced a listener: %q", output.String())
 	}
+	data, err := os.ReadFile(message)
+	if err != nil || string(data) != "preserved live message" {
+		t.Fatalf("occupied-port launch changed existing delivery: %q, %v", data, err)
+	}
+	assertDirectoryEntries(t, root, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestMainErrorHelper$")
+	command.Env = append(os.Environ(), "LOCALPOST_MAIN_ERROR_HELPER=1", "LOCALPOST_STARTUP_ROOT="+root, "LOCALPOST_STARTUP_PORT="+strconv.Itoa(port))
+	var stdout, stderr bytes.Buffer
+	command.Stdout, command.Stderr = &stdout, &stderr
+	var exitError *exec.ExitError
+	if err := command.Run(); !errors.As(err, &exitError) || exitError.ExitCode() != 1 {
+		t.Fatalf("occupied-port CLI exit = %v, stderr = %q", err, stderr.String())
+	}
+	if stdout.Len() != 0 || !strings.Contains(stderr.String(), "localpost: ERROR: listen on 127.0.0.1:"+strconv.Itoa(port)) {
+		t.Fatalf("occupied-port CLI diagnostics: stdout = %q, stderr = %q", stdout.String(), stderr.String())
+	}
+	data, err = os.ReadFile(message)
+	if err != nil || string(data) != "preserved live message" {
+		t.Fatalf("occupied-port CLI changed existing delivery: %q, %v", data, err)
+	}
+	assertDirectoryEntries(t, root, 1)
+}
+
+func TestMainErrorHelper(t *testing.T) {
+	if os.Getenv("LOCALPOST_MAIN_ERROR_HELPER") != "1" {
+		return
+	}
+	os.Args = []string{"localpost", "--port", os.Getenv("LOCALPOST_STARTUP_PORT"), "--mailbox-root", os.Getenv("LOCALPOST_STARTUP_ROOT")}
+	main()
+	t.Fatal("main returned after an occupied-port failure")
 }
 
 func TestServeHTTPAndCancellation(t *testing.T) {

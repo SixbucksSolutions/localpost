@@ -323,7 +323,7 @@ func TestResolveSource(t *testing.T) {
 }
 
 func TestRuntimeReadmeUsesMailboxRootAndCurrentAPI(t *testing.T) {
-	for _, required := range []string{"--mailbox-root", "JSON {}", "/api/2026-11-05/registrations", "returned id and directory"} {
+	for _, required := range []string{"--mailbox-root", "JSON {}", "/api/2026-11-05/registrations", "returned id and directory", "dedicated absolute mailbox root", "WARNING:", "recursively deletes all existing entries", "after binding the requested port and before accepting HTTP requests", "after an unclean exit", "preserves delivered files until the next startup", "Operators coordinate instances", "hidden staging .dat files", "Windows service wrapper separately owns", "Diagnostic output uses\nstandard streams", "occupied port causes startup to fail before mailbox cleanup"} {
 		if !strings.Contains(runtimeReadme, required) {
 			t.Errorf("runtime README missing %q", required)
 		}

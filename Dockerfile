@@ -1,7 +1,7 @@
 FROM scratch
 
 # Build with the verified, unpacked release archive as the build context.
-ARG VERSION=0.2.0
+ARG VERSION=0.2.1
 ARG SOURCE_REVISION
 ARG PACKAGING_REVISION
 

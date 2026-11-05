@@ -30,11 +30,24 @@ additionally checks an existing v0.2.0 daemon using temporary owned registration
 official schema snapshots and their recorded provenance when updating tooling.
 
 Build release candidates only from a clean, identified commit with
-`go run ./tools/release --version 0.2.0 --output <new-or-empty-directory>`.
+`go run ./tools/release --version 0.2.1 --output <new-or-empty-directory>`.
 Preserve the exact candidate archives and checksums for qualification and later
 publication; do not rebuild or substitute artifacts after candidate acceptance.
 The candidate workflow builds twice to check reproducibility and does not publish
 a release or replace the shared daemon.
+
+For v0.2.1 development, use a dedicated existing absolute `--mailbox-root`:
+every startup warns if it contains stale entries and deletes all children before
+HTTP serving begins, after normal stop or kill alike. Reserve the port first so
+an occupied port fails before deletion. The root remains. The operator must ensure that only one daemon uses a root,
+even across different ports. The daemon does not lock the root. DELETE retains
+files until the next startup.
+
+The daemon MUST write only `.dat` message files for active registrations. Hidden
+`.dat` upload staging files may contain message bytes only. Mailbox directories
+may be created as needed. Never add write probes, lock files, metadata, state
+files, or daemon log files. Daemon diagnostics go to the console. Root write
+failures are discovered by cleanup or later mailbox and upload operations. The API remains `/api/2026-11-05`.
 
 For v0.2.0, the daemon requires an existing absolute `--mailbox-root`. Register
 with `{}` at `/api/2026-11-05/registrations` and use the returned `id` and

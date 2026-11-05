@@ -63,7 +63,7 @@ export function checkContractInvariants(document) {
     assert.equal(header.schema.const, expected);
   }
   assert.equal(versionError.content['application/json'].schema.$ref, schemaRef('Error'));
-  assert.equal(document.info.version, '0.2.0');
+  assert.equal(document.info.version, '0.2.1');
   assert.deepEqual(Object.keys(document.paths).sort(), [apiPrefix + '/registrations', apiPrefix + '/registrations/{id}', apiPrefix + '/registrations/{id}/messages']);
   const upload = document.paths[apiPrefix + '/registrations/{id}/messages'].post.requestBody;
   assert.equal(upload.required, false, 'Empty uploads are accepted');

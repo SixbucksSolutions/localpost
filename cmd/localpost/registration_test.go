@@ -123,7 +123,7 @@ func TestMailboxRootRejectsInvalidDirectories(t *testing.T) {
 	}
 }
 
-func TestRegistrationUnwritableDirectory(t *testing.T) {
+func TestMailboxRootValidationDoesNotWrite(t *testing.T) {
 	directory := t.TempDir()
 	if runtime.GOOS == "windows" {
 		current, err := user.Current()
@@ -162,8 +162,8 @@ func TestRegistrationUnwritableDirectory(t *testing.T) {
 		}
 		t.Skip("test user bypasses directory write restrictions")
 	}
-	if _, err := prepareMailboxRoot(directory); err == nil {
-		t.Fatal("unwritable root accepted")
+	if _, err := prepareMailboxRoot(directory); err != nil {
+		t.Fatalf("readable directory rejected by metadata-only validation: %v", err)
 	}
 	entries, err := os.ReadDir(directory)
 	if err != nil || len(entries) != 0 {

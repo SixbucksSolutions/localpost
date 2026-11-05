@@ -27,6 +27,17 @@ without warranty. These good-faith tests carry no support commitment.
 [GitHub issues](https://github.com/SixbucksSolutions/localpost/issues) are welcome,
 with no guarantee of a response or fix.
 
+**Development:** v0.2.1 changes startup retention: every daemon start warns if the
+dedicated mailbox root contains stale entries and removes all of its children
+before serving HTTP. The daemon reserves its port before cleanup, so an occupied
+port fails before any deletion. This applies after a normal stop or forced termination.
+The root itself remains. Copy any needed data elsewhere before starting or
+restarting. Never put unrelated data in the root. The operator must ensure only
+one daemon uses a root, including across different ports. There is no root lock.
+DELETE still leaves files until the next start. The API date and routes remain unchanged. See the
+[pending v0.2.1 notes](docs/releases/v0.2.1.md). The released v0.2.0 retains
+mailbox contents across restart.
+
 **Implementation language:** Go, with a standard-library-first approach and
 standalone executables. [ADR 0006](docs/adr/0006-go-implementation-language.md)
 records the decision and the tradeoff against Rust.
@@ -179,7 +190,7 @@ From a clean checkout, build the versioned candidates into a new or empty direct
 
 ```powershell
 $candidateDir = Join-Path $env:TEMP ('localpost-candidate-' + [guid]::NewGuid())
-go run ./tools/release --version 0.2.0 --output $candidateDir
+go run ./tools/release --version 0.2.1 --output $candidateDir
 ```
 
 Preserve published artifact bytes. A fresh local build does not replace a
@@ -217,7 +228,8 @@ checks run in native-architecture containers on Ubuntu 26.04, sharing the host
 kernel and a bind-mounted filesystem. Evidence records the actual OS, kernel,
 filesystem and image digest. This scope covers Alpine userspace compatibility.
 
-Both waves use the frozen `release/0.2.0-candidate.json` artifact identity.
+Both waves use the frozen `release/0.2.1-candidate.json` artifact identity once
+the v0.2.1 candidate is prepared.
 They verify the candidate artifacts before publication or the matching public
 assets after publication.
 
@@ -247,12 +259,14 @@ $inbox = $registration.directory
 A successful response contains `id` and `directory`. The ID is a UUIDv4 and
 is the basename of the absolute directory created beneath the configured root.
 There is no registration-specific port or process ID. Registrations disappear
-on restart, while directories and files remain.
+on restart. In released v0.2.0, directories and files remain. Development
+v0.2.1 removes all root children at the next startup.
 
 On POSIX, mailbox directories use `0700` and files use `0600`. Run the service
 and consuming agent under the same UID. On Windows, new directories and files
 inherit the root's ACL. The operator must grant the service and agent the access
-they need. A successful startup probe does not guarantee later writes.
+they need. The daemon does not write a startup probe. Write failures can surface
+during cleanup, mailbox creation, or delivery.
 
 Registration requests accept one JSON object, at most 64 KiB, with media-type
 parameters such as `charset=utf-8` permitted. Control-request reads have a
@@ -357,7 +371,8 @@ localpost does not queue or retry the request.
 With the 10 MiB message limit, the 16 admitted uploads account for at most
 160 MiB of active payload. This is not a limit on all process memory, retained
 deliveries, or temporary files left after failed cleanup. Delivered-file retention
-remains the agent's responsibility. No extra runtime configuration is required.
+is the agent's responsibility until the next startup cleanup in v0.2.1.
+No extra runtime configuration is required.
 
 ## Browser CORS
 
@@ -428,7 +443,9 @@ notifications are hints; agents should also reconcile directory contents.
 
 Unregistering stops new uploads, lets accepted uploads finish within the timeout,
 and removes that logical mailbox. Delivered files remain in place. localpost
-creates each destination directory and never deletes deliveries or mailbox directories.
+creates each destination directory. Released v0.2.0 retains these directories on
+restart. Development v0.2.1 reserves its port, deletes all root children, then
+serves HTTP.
 
 ## Migrating from v0.1.0
 
@@ -442,7 +459,8 @@ The v0.2.0 release uses dated routes and service-created directories.
   Retired unversioned routes and unsupported API dates return `404` with
   `unsupported_api_version` and name the supported prefix. There is no latest alias.
 - Re-register after restart. Old IDs do not survive. Retire a registration before
-  removing its directory. Deletion and restart preserve directories and files.
+  removing its directory. In v0.2.0, deletion and restart preserve directories
+  and files. In development v0.2.1, deletion preserves them only until startup.
   Account for orphaned directories after lost responses and manage retention.
 
 The planned rollout includes migration notices to FGA Dev M08, localswim V2 Dev

@@ -7,8 +7,9 @@ import { execFileSync } from 'node:child_process';
 const architecture = process.env.ARCHITECTURE;
 assert.ok(['amd64', 'arm64'].includes(architecture));
 assert.equal(process.arch, architecture === 'amd64' ? 'x64' : 'arm64');
-const candidate = JSON.parse(await readFile('release/0.2.0-candidate.json'));
-assert.equal(candidate.version, '0.2.0');
+const candidate = JSON.parse(await readFile('release/0.2.1-candidate.json'));
+const version = candidate.version;
+assert.equal(version, '0.2.1');
 assert.match(candidate.sourceCommit, /^[0-9a-f]{40}$/);
 assert.ok(['candidate', 'published'].includes(candidate.publicationStatus));
 if (process.env.PUBLISH_CONTAINERS === 'true') {
@@ -17,13 +18,13 @@ if (process.env.PUBLISH_CONTAINERS === 'true') {
 }
 const directory = path.join(process.env.RUNNER_TEMP, 'candidate');
 await mkdir(directory, { recursive: true });
-const archive = `localpost_0.2.0_linux_${architecture}.tar.gz`;
+const archive = `localpost_${version}_linux_${architecture}.tar.gz`;
 if (candidate.publicationStatus === 'published') {
   for (const name of [archive, 'SHA256SUMS']) {
-    execFileSync('curl', ['--fail', '--location', '--silent', '--show-error', '--connect-timeout', '10', '--max-time', '120', `https://github.com/SixbucksSolutions/localpost/releases/download/v0.2.0/${name}`, '-o', path.join(directory, name)], { timeout: 130000, stdio: 'inherit' });
+    execFileSync('curl', ['--fail', '--location', '--silent', '--show-error', '--connect-timeout', '10', '--max-time', '120', `https://github.com/SixbucksSolutions/localpost/releases/download/v${version}/${name}`, '-o', path.join(directory, name)], { timeout: 130000, stdio: 'inherit' });
   }
 } else {
-  assert.equal(candidate.artifactName, `localpost-0.2.0-${candidate.sourceCommit}`);
+  assert.equal(candidate.artifactName, `localpost-${version}-${candidate.sourceCommit}`);
   assert.ok(Number.isSafeInteger(candidate.artifactId) && candidate.artifactId > 0);
   assert.ok(Number.isSafeInteger(candidate.artifactRunId) && candidate.artifactRunId > 0);
   const artifact = JSON.parse(execFileSync('gh', ['api', `repos/SixbucksSolutions/localpost/actions/artifacts/${candidate.artifactId}`], { timeout: 30000, encoding: 'utf8' }));
@@ -45,6 +46,6 @@ await mkdir(unpacked, { recursive: true });
 execFileSync('tar', ['-xzf', path.join(directory, archive), '-C', unpacked], { timeout: 30000 });
 if (process.env.GITHUB_ENV) {
   const { appendFile } = await import('node:fs/promises');
-  await appendFile(process.env.GITHUB_ENV, `SOURCE_COMMIT=${candidate.sourceCommit}\n`);
+  await appendFile(process.env.GITHUB_ENV, `SOURCE_COMMIT=${candidate.sourceCommit}\nRELEASE_VERSION=${version}\n`);
 }
 console.log('Candidate archive identity verified.');

@@ -12,6 +12,8 @@ export TMPDIR
 TMPDIR=$(mktemp -d "$RUNNER_TEMP/localpost-certification.XXXXXX")
 mkdir "$TMPDIR/mailboxes"
 mailbox_root="$TMPDIR/mailboxes"
+mkdir "$TMPDIR/default-mailboxes"
+default_root="$TMPDIR/default-mailboxes"
 name="localpost-certify-${GITHUB_RUN_ID:?}-${GITHUB_JOB:?}"
 image=alpine:3.24.3
 pids=()
@@ -69,7 +71,8 @@ fi
 
 start() {
   local suffix=$1
-  shift
+  local service_root=$2
+  shift 2
   if [[ "$platform" == alpine-3.24 ]]; then
     local container="$name-$suffix"
     containers+=("$container")
@@ -77,9 +80,9 @@ start() {
       --user "$(id -u):$(id -g)" --env PATH= --env "TMPDIR=$TMPDIR" \
       --mount "type=bind,source=$package,target=/package,readonly" \
       --mount "type=bind,source=$TMPDIR,target=$TMPDIR" \
-      --entrypoint /package/localpost "$image" --mailbox-root "$mailbox_root" "$@" >/dev/null
+      --entrypoint /package/localpost "$image" --mailbox-root "$service_root" "$@" >/dev/null
   else
-    env PATH= "$binary" --mailbox-root "$mailbox_root" "$@" >"$report/$suffix.log" 2>&1 &
+    env PATH= "$binary" --mailbox-root "$service_root" "$@" >"$report/$suffix.log" 2>&1 &
     pids+=("$!")
   fi
 }
@@ -109,8 +112,8 @@ for port in 53147 53151; do
     exit 1
   fi
 done
-start override --port 53151
-start default
+start override "$mailbox_root" --port 53151
+start default "$default_root"
 wait_ready 53151
 wait_ready 53147
 assert_running
@@ -132,17 +135,19 @@ if [[ "$platform" == alpine-3.24 ]]; then
 fi
 for port in 53147 53151; do
   args=()
+  conflict_root="$TMPDIR/conflict-$port"
+  mkdir "$conflict_root"
   if [[ "$port" == 53151 ]]; then args=(--port "$port"); fi
   if [[ "$platform" == alpine-3.24 ]]; then
     containers+=("$name-conflict-$port")
     if docker run --name "$name-conflict-$port" --network host --user "$(id -u):$(id -g)" \
       --env PATH= --mount "type=bind,source=$package,target=/package,readonly" \
       --mount "type=bind,source=$TMPDIR,target=$TMPDIR" \
-      --entrypoint /package/localpost "$image" --mailbox-root "$mailbox_root" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
+      --entrypoint /package/localpost "$image" --mailbox-root "$conflict_root" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
       echo "Occupied port $port was accepted" >&2; exit 1
     fi
   else
-    if env PATH= "$binary" --mailbox-root "$mailbox_root" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
+    if env PATH= "$binary" --mailbox-root "$conflict_root" "${args[@]}" >"$report/conflict-$port.log" 2>&1; then
       echo "Occupied port $port was accepted" >&2; exit 1
     fi
   fi
@@ -179,6 +184,41 @@ else
   pids=()
 fi
 printf 'runtime-PATH=empty\nnonroot=verified\ndefault-and-override=passed\ndefault-and-override-conflicts=passed\nSIGINT-shutdown=passed\n' >>"$report/platform.txt"
+
+# Exercise restart cleanup under the certified userspace as well as the Node probe.
+mkdir -p "$mailbox_root/stale-mailbox/nested"
+printf '\000\377stale' >"$mailbox_root/stale-mailbox/nested/stale.dat"
+printf 'stray bytes' >"$mailbox_root/stray-file"
+start restart "$mailbox_root" --port 53151
+wait_ready 53151
+test -z "$(ls -A "$mailbox_root")"
+mkdir -p "$mailbox_root/crash-mailbox"
+printf 'crash bytes' >"$mailbox_root/crash-mailbox/stale.dat"
+if [[ "$platform" == alpine-3.24 ]]; then
+  docker logs "$name-restart" >"$report/restart.log" 2>&1
+  docker kill --signal KILL "$name-restart" >/dev/null
+  test "$(docker inspect --format '{{.State.Running}}' "$name-restart")" = false
+else
+  kill -KILL "${pids[-1]}"
+  wait "${pids[-1]}" 2>/dev/null || true
+  pids=()
+fi
+grep -q 'WARNING' "$report/restart.log"
+test "$(cat "$mailbox_root/crash-mailbox/stale.dat")" = 'crash bytes'
+start crash-restart "$mailbox_root" --port 53151
+wait_ready 53151
+test -z "$(ls -A "$mailbox_root")"
+if [[ "$platform" == alpine-3.24 ]]; then
+  docker logs "$name-crash-restart" >"$report/crash-restart.log" 2>&1
+  docker stop --signal SIGINT --time 10 "$name-crash-restart" >/dev/null
+  test "$(docker inspect --format '{{.State.ExitCode}}' "$name-crash-restart")" = 0
+else
+  kill -INT "${pids[-1]}"
+  wait "${pids[-1]}"
+  pids=()
+fi
+grep -q 'WARNING' "$report/crash-restart.log"
+printf 'normal-and-SIGKILL-restart-cleanup=passed\n' >>"$report/platform.txt"
 
 # The workflow has verified all cmd/localpost sources against the original source commit.
 # Compile a static test executable so Alpine exercises its own native filesystem/runtime.

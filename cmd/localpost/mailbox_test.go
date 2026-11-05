@@ -163,7 +163,7 @@ func TestRunRequiresMailboxRootBeforeListening(t *testing.T) {
 	}
 }
 
-func TestMailboxRetentionAndPrivatePermissions(t *testing.T) {
+func TestMailboxRetirementRetentionAndPrivatePermissions(t *testing.T) {
 	root := t.TempDir()
 	r := newRegistry(root)
 	mailbox, err := r.register()
@@ -199,20 +199,22 @@ func TestMailboxRetentionAndPrivatePermissions(t *testing.T) {
 	}
 	r.unregister(httptest.NewRecorder(), mailbox.ID)
 	r.close()
-	restarted := newRegistry(root)
-	defer restarted.close()
+	// Registry replacement alone has no startup side effects. Actual daemon
+	// startup cleanup is covered through run in startup_test.go.
+	replacement := newRegistry(root)
+	defer replacement.close()
 	missing := httptest.NewRecorder()
-	restarted.ServeHTTP(missing, httptest.NewRequest(http.MethodDelete, apiPrefix+"/registrations/"+mailbox.ID, nil))
+	replacement.ServeHTTP(missing, httptest.NewRequest(http.MethodDelete, apiPrefix+"/registrations/"+mailbox.ID, nil))
 	if missing.Code != 404 {
-		t.Fatal("restart restored an old registration")
+		t.Fatal("registry replacement restored an old registration")
 	}
 	data, err := os.ReadFile(filepath.Join(mailbox.Directory, files[0].Name()))
 	if err != nil || string(data) != "retained" {
-		t.Fatal("retirement or restart removed delivered bytes")
+		t.Fatal("retirement removed delivered bytes")
 	}
-	next, err := restarted.register()
+	next, err := replacement.register()
 	if err != nil || next.Directory == mailbox.Directory {
-		t.Fatal("restart adopted a retained mailbox")
+		t.Fatal("registry replacement adopted a retained mailbox")
 	}
 	if _, err := os.Stat(root); errors.Is(err, os.ErrNotExist) {
 		t.Fatal("root was removed")

@@ -260,6 +260,9 @@ func prepareMailboxRoot(directory string) (string, error) {
 		return "", errors.New("mailbox root must exist and be accessible")
 	}
 	directory = filepath.Clean(resolved)
+	if filepath.Dir(directory) == directory {
+		return "", errors.New("mailbox root must be a dedicated directory, not a filesystem root")
+	}
 	info, err := os.Stat(directory)
 	if err != nil {
 		return "", errors.New("directory must exist and be accessible")
@@ -267,16 +270,13 @@ func prepareMailboxRoot(directory string) (string, error) {
 	if !info.IsDir() {
 		return "", errors.New("directory must name an existing directory")
 	}
-	probe, err := os.CreateTemp(directory, ".localpost-probe-*")
+	root, err := os.Open(directory)
 	if err != nil {
-		return "", errors.New("directory must be writable")
+		return "", errors.New("directory must be accessible")
 	}
-	name := probe.Name()
-	_, writeErr := probe.Write([]byte("localpost directory probe\n"))
-	closeErr := probe.Close()
-	removeErr := os.Remove(name)
-	if writeErr != nil || closeErr != nil || removeErr != nil {
-		return "", errors.New("directory must support writing and removing temporary files")
+	defer func() { _ = root.Close() }()
+	if _, err := root.ReadDir(1); err != nil && !errors.Is(err, io.EOF) {
+		return "", errors.New("directory contents must be accessible")
 	}
 	return directory, nil
 }

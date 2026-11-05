@@ -23,7 +23,7 @@ test('vendored schema and license bytes match recorded provenance', () => {
 test('canonical OpenAPI 3.2.1 contract, refs and modeled examples pass', () => {
   assert.equal(source.openapi, '3.2.1');
   assert.deepEqual(validateDocument(source), { references: 96, examples: 10 });
-  assert.equal(source.info.version, '0.2.0');
+  assert.equal(source.info.version, '0.2.1');
   const validate = createValueValidator(source);
   validate('#/components/schemas/RegistrationRequest', {});
   assert.throws(() => validate('#/components/schemas/RegistrationRequest', { directory: '' }), /additional properties|maxProperties/);

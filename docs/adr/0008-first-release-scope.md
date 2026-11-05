@@ -1,5 +1,6 @@
 # ADR 0008: First-release scope and publication gate
 
+- **v0.2.1 update:** startup retention is superseded by [ADR 0011](0011-startup-mailbox-cleanup.md).
 - **Status:** Accepted through Terry's completion of M06.01.
 - **Date:** 2026-11-04
 - **Authority:** M06.01 defines the release proposal. This record does not build,

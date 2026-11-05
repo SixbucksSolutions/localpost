@@ -94,7 +94,7 @@ export async function runServiceStopUpload(options) {
     const response = await partialUpload({ url: `${origin}${apiPrefix}/registrations/${id}/messages`, prefix, tail, requestTimeoutMs: 20000, observe: async () => {
       await waitFor(async () => {
         const names = await entries(directory);
-        assert.ok(names.every((name) => name.startsWith('.localpost-upload-')), 'Final file appeared before upload completion');
+        assert.ok(names.every((name) => name.startsWith('.localpost-upload-') && name.endsWith('.dat')), 'Final file appeared before upload completion');
         if (names.length !== 1) return false;
         const info = await lstat(path.join(directory, names[0]));
         return info.isFile() && !info.isSymbolicLink() && info.size > 0;
@@ -118,7 +118,7 @@ export async function runServiceStopUpload(options) {
       process.kill(owner.wrapperPid, 0);
       const names = await entries(directory);
       assert.equal(names.length, 1);
-      assert.ok(names[0].startsWith('.localpost-upload-'), 'Final file appeared before upload completion');
+      assert.ok(names[0].startsWith('.localpost-upload-') && names[0].endsWith('.dat'), 'Final file appeared before upload completion');
     } });
     assert.equal(response.status, 200, 'Admitted upload did not finish successfully during SCM stop');
     const receipt = JSON.parse(response.body);

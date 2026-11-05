@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const execute = promisify(execFile);
 const image = 'ghcr.io/sixbuckssolutions/localpost';
-const version = '0.2.0';
+const version = '0.2.1';
 const digestPattern = /^sha256:[0-9a-f]{64}$/;
 const docker = async (...args) => (await execute('docker', args, { timeout: 180000, maxBuffer: 2 * 1024 * 1024 })).stdout.trim();
 export function isMissingManifest(error, reference) {
@@ -144,7 +144,7 @@ export function checkPublicationPolicy(candidate, optIn) {
 export async function main(mode = process.argv[2]) {
   const root = path.join(process.env.RUNNER_TEMP, 'container-publication');
   await mkdir(root, { recursive: true });
-  const candidateManifest = JSON.parse(await readFile('release/0.2.0-candidate.json'));
+  const candidateManifest = JSON.parse(await readFile('release/0.2.1-candidate.json'));
   if (['publish', 'promote', 'resume-check', 'qualified-check'].includes(mode)) {
     checkPublicationPolicy(candidateManifest, process.env.PUBLISH_CONTAINERS);
   }
