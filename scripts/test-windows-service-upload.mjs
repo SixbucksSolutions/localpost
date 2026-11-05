@@ -64,7 +64,7 @@ export async function runServiceStopUpload(options) {
   const powershellArgs = ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass'];
   const processInfo = await execute(powershell, [...powershellArgs, '-Command',
     `$ErrorActionPreference='Stop'; $s=Get-CimInstance Win32_Service -Filter "Name='${serviceName}'"; if (!$s -or $s.State -ne 'Running') { throw 'Service is not running' }; $children=@(Get-CimInstance Win32_Process -Filter "ParentProcessId=$($s.ProcessId)" | Where-Object Name -eq 'localpost.exe'); if ($children.Count -ne 1) { throw 'Expected one daemon child' }; @{ wrapperPid=[int]$s.ProcessId; daemonPid=[int]$children[0].ProcessId; executable=$children[0].ExecutablePath } | ConvertTo-Json -Compress`],
-  { timeout: 10000, maxBuffer: 8192, windowsHide: true });
+  { timeout: 30000, maxBuffer: 8192, windowsHide: true });
   const owner = JSON.parse(processInfo.stdout);
   assert.ok(Number.isInteger(owner.wrapperPid) && owner.wrapperPid > 0);
   assert.ok(Number.isInteger(owner.daemonPid) && owner.daemonPid > 0);
@@ -137,7 +137,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     if (options['--evidence-path']) await writeFile(options['--evidence-path'], JSON.stringify(evidence, null, 2) + '\n', { flag: 'wx' });
     console.log('Windows SCM stop preserved the admitted upload and closed the listener.');
   } catch (error) {
-    console.error(`Windows SCM admitted-upload probe failed: ${error.message}`);
+    console.error('Windows SCM admitted-upload probe failed.');
+    console.error(JSON.stringify({
+      message: String(error.message ?? '').slice(0, 2048),
+      code: String(error.code ?? error.name ?? 'UNKNOWN').slice(0, 80),
+      killed: error.killed === true,
+      signal: String(error.signal ?? '').slice(0, 80),
+      stderr: String(error.stderr ?? '').slice(0, 4096),
+    }, null, 2));
     process.exitCode = 1;
   }
 }
