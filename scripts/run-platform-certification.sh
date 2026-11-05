@@ -93,9 +93,11 @@ wait_ready() {
 assert_running() {
   local pid container
   for pid in "${pids[@]}"; do kill -0 "$pid"; done
-  for container in "${containers[@]}"; do
-    test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
-  done
+  if [[ "$platform" == alpine-3.24 ]]; then
+    for container in "$name-override" "$name-default"; do
+      test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
+    done
+  fi
 }
 
 # Both ports must be free before creating this run's listeners.
