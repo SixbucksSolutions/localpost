@@ -9,7 +9,14 @@ import { qualifyPackage, partialUpload } from './qualify-packaged-service.mjs';
 import { requestBounded } from './check-openapi-service.mjs';
 
 const execute = promisify(execFile);
-const docker = async (...args) => (await execute('docker', args, { timeout: 120000, maxBuffer: 1024 * 1024 })).stdout.trim();
+const docker = async (...args) => {
+  try {
+    return (await execute('docker', args, { timeout: 120000, maxBuffer: 1024 * 1024 })).stdout.trim();
+  } catch (error) {
+    error.dockerOperation = args.slice(0, 2).join(' ');
+    throw error;
+  }
+};
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const image = process.env.CONTAINER_IMAGE;
 const architecture = process.env.ARCHITECTURE;
@@ -25,7 +32,7 @@ await chmod(root, 0o755);
 const containers = [];
 const prefix = `localpost-${process.pid}-${Date.now()}`;
 const expectedCommit = '852b8a9ded0d03e98cada5810b18c92746848545';
-let phase = 'image-configuration';
+let phase = 'host-metadata';
 const send = (port, route, method, body) => requestBounded({ url: `http://127.0.0.1:${port}${route}`, method, body: body && Buffer.from(JSON.stringify(body)), headers: body ? { 'Content-Type': 'application/json' } : {}, timeoutMs: 5000 });
 const start = async (suffix, args = [], defaultUser = false) => {
   const name = `${prefix}-${suffix}`;
@@ -59,7 +66,9 @@ try {
     filesystemType: String((await statfs(root)).type),
     docker: await docker('version', '--format', 'client={{.Client.Version}} server={{.Server.Version}}'),
   };
+  phase = 'image-inspect';
   const [configuration] = JSON.parse(await docker('image', 'inspect', image));
+  phase = 'image-configuration';
   assert.equal(configuration.Architecture, architecture);
   assert.equal(configuration.Os, 'linux');
   assert.deepEqual(configuration.Config.Entrypoint, ['/localpost']);
@@ -74,10 +83,15 @@ try {
   assert.match(labels['io.localpost.packaging-revision'], /^[0-9a-f]{40}$/);
   const copyContainer = `${prefix}-copy`;
   containers.push(copyContainer);
+  phase = 'copy-container-create';
   await docker('create', '--name', copyContainer, image, '--version');
+  phase = 'binary-copy';
   await docker('cp', `${copyContainer}:/localpost`, path.join(root, 'image-binary'));
+  phase = 'binary-identity';
   assert.equal(hash(await readFile(path.join(root, 'image-binary'))), hash(await readFile(path.join(packageDir, 'localpost'))));
+  phase = 'assets-copy';
   await docker('cp', `${copyContainer}:/usr/share/localpost`, path.join(root, 'assets'));
+  phase = 'assets-identity';
   const compare = async (relative) => {
     const source = path.join(packageDir, relative);
     if ((await stat(source)).isDirectory()) {
@@ -85,9 +99,11 @@ try {
     } else assert.equal(hash(await readFile(path.join(root, 'assets', relative))), hash(await readFile(source)));
   };
   for (const member of ['LICENSE', 'build-info.json', 'openapi.json', 'licenses']) await compare(member);
+  phase = 'default-user-version';
   const versionContainer = `${prefix}-version`;
   containers.push(versionContainer);
   assert.equal(await docker('run', '--rm', '--name', versionContainer, '--read-only', '--network', 'none', image, '--version'), `localpost 0.1.0 (commit ${expectedCommit}; go1.27.3; linux/${architecture})`);
+  phase = 'isolated-port-check';
   for (const port of [53147, 53151, 53152]) {
     let occupied = false;
     try { await send(port, '/', 'GET'); occupied = true; } catch { /* A refused connection means this isolated port is available. */ }
@@ -163,7 +179,18 @@ try {
   await writeFile(path.join(report, 'qualification.json'), JSON.stringify({ passed: true, host, imageId: configuration.Id, architecture, labels, qualification, defaultUserDelivery: true, portsAndConflicts: true, dockerStopAdmittedUpload: true, persistedBytes: prefixBytes.length + tail.length }, null, 2));
   console.log('Container qualification passed.');
 } catch (error) {
-  await writeFile(path.join(report, 'failure.json'), JSON.stringify({ passed: false, phase, code: error.code ?? error.name }));
+  // This isolated CI harness invokes only fixed commands with owned paths and synthetic payloads.
+  // Bound diagnostics locally so a Docker failure remains actionable without dumping process state.
+  const bounded = (value, limit) => typeof value === 'string' ? value.slice(0, limit) : undefined;
+  await writeFile(path.join(report, 'failure.json'), JSON.stringify({
+    passed: false,
+    phase,
+    code: error.code ?? error.name,
+    dockerOperation: error.dockerOperation,
+    message: bounded(error.message, 4096),
+    stderr: bounded(error.stderr, 8192),
+    stdout: bounded(error.stdout, 4096),
+  }, null, 2));
   throw new Error(`Container qualification failed during ${phase}`);
 } finally {
   for (const name of containers) await docker('rm', '--force', name).catch(() => {});

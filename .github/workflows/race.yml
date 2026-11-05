@@ -67,7 +67,7 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node scripts/validate-openapi.mjs
-          node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs scripts/qualify-packaged-service.test.mjs
+          node --test scripts/validate-openapi.test.mjs scripts/check-openapi-service.test.mjs scripts/qualify-packaged-service.test.mjs scripts/publish-containers.test.mjs
       - name: Check live service contract
         run: |
           go build -o "$RUNNER_TEMP/localpost-contract" ./cmd/localpost

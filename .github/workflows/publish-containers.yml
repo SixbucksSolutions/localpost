@@ -40,6 +40,7 @@ jobs:
         run: |
           node scripts/container-package.mjs
           npm ci --ignore-scripts --no-audit --no-fund
+          node --test scripts/publish-containers.test.mjs
       - name: Package existing release bytes
         run: |
           source_epoch=$(git show -s --format=%ct 852b8a9ded0d03e98cada5810b18c92746848545)

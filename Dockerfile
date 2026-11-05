@@ -14,7 +14,7 @@ LABEL org.opencontainers.image.title="localpost" \
       io.localpost.packaging-revision="${PACKAGING_REVISION}"
 
 COPY --chmod=0555 localpost /localpost
-COPY --chmod=0444 LICENSE build-info.json openapi.json /usr/share/localpost/
+COPY LICENSE build-info.json openapi.json /usr/share/localpost/
 COPY licenses/ /usr/share/localpost/licenses/
 
 USER 65532:65532
