@@ -201,7 +201,7 @@ The implementation should establish these properties before release:
 
 Go is selected by ADR 0006. The core has executable HTTP integration and bounded
 concurrency qualification tests, plus a Linux race-instrumented CI run. Release
-artifact qualification and publication remain later work. The
+artifact qualification supports the [published v0.1.0 release](releases/v0.1.0.md). The
 [browser pilot](../examples/browser-diagnostics/README.md) records its verified
 headless Chrome workflow; it does not establish cross-browser coverage.
 First-release targets and artifact/publication rules are accepted in

@@ -22,8 +22,9 @@ The current development host is Windows 11 Pro, build 26200, with NTFS storage.
 Earlier CI ran on Ubuntu 24.04 LTS x64. Terry updated the release qualification target to Ubuntu 26.04 LTS on 2026-11-04; current CI targets Ubuntu 26.04. These are available qualification
 environments, not evidence that release archives have already been tested.
 M06.03 recorded ext4 for the Linux qualification and NTFS for Windows.
-The detailed observations are in the draft release notes; publication remains
-gated on candidate acceptance. Support claims are limited to environments actually qualified.
+The detailed observations are in the release notes. Terry accepted the candidate
+and v0.1.0 was published under this gate. Support claims are limited to environments
+actually qualified.
 Other Windows versions, Linux distributions, architectures, and filesystems are
 unverified rather than implicitly supported by cross-compilation.
 

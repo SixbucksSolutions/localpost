@@ -80,8 +80,9 @@ JSON mailbox registration, opaque message delivery, mailbox unregistration,
 and permissive browser CORS. The core has HTTP integration, bounded robustness,
 and race-instrumented verification. A headless Chrome demonstration on Windows
 has exercised diagnosis, correction, and rechecking through delivered files.
-OpenAPI documentation and a packaged release remain later work.
+The OpenAPI reference and [v0.1.0 release](releases/v0.1.0.md) are available,
+with Windows 11/NTFS and Ubuntu 26.04/ext4 qualification recorded.
 **Go is the selected implementation language**, as recorded
 in [ADR 0006](adr/0006-go-implementation-language.md), with Go 1.27.3 selected for
-development. Release packaging and targets remain open; see the
-[ADR ledger](adr/README.md).
+development. The accepted release packaging and target scope are recorded in
+[ADR 0008](adr/0008-first-release-scope.md); future changes require a new decision.

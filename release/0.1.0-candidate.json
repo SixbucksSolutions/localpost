@@ -5,7 +5,7 @@
   "artifactRunId": 41950300326,
   "artifactId": 13380751806,
   "artifactName": "localpost-0.1.0-852b8a9ded0d03e98cada5810b18c92746848545",
-  "publicationStatus": "unpublished",
+  "publicationStatus": "published",
   "releaseNotes": "docs/releases/v0.1.0.md",
   "assets": [
     {
@@ -24,7 +24,7 @@
     "sha256": "7015ab8a21ee4d3283fb2c36ff0365efe42c266d8ddd902d5a69c1b076feb1ea"
   },
   "qualification": {
-    "status": "passed-awaiting-owner-acceptance",
+    "status": "owner-accepted",
     "windows": {
       "os": "Windows 11 Pro",
       "build": "26200",
@@ -40,5 +40,8 @@
       "uid": 1001,
       "initialRun": "https://github.com/SixbucksSolutions/localpost/actions/runs/41952049868"
     }
-  }
+  },
+  "releaseUrl": "https://github.com/SixbucksSolutions/localpost/releases/tag/v0.1.0",
+  "releaseId": 434683066,
+  "tagObject": "04f9363861b2e010ffdce73d7d225a231c32e5e3"
 }

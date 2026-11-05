@@ -2,6 +2,11 @@
 
 A localhost post office for agents.
 
+**Latest release: [v0.1.0](https://github.com/SixbucksSolutions/localpost/releases/tag/v0.1.0)** —
+[Windows x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_windows_amd64.zip) ·
+[Linux x64](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/localpost_0.1.0_linux_amd64.tar.gz) ·
+[SHA256SUMS](https://github.com/SixbucksSolutions/localpost/releases/download/v0.1.0/SHA256SUMS)
+
 **API reference: [OpenAPI 3.2.1 contract](openapi.json).**
 
 localpost is one shared service that receives HTTP POST bodies and delivers them
@@ -13,9 +18,9 @@ its normal filesystem tools.
 message delivery, unregistration, and permissive CORS are implemented. Bounded
 robustness checks and race-test automation accompany the core. The browser pilot
 has completed a headless Chrome feedback-loop proof on Windows. Its OpenAPI
-contract is available above. Versioned candidate packaging is being prepared in
-M06. The preserved candidate has been qualified on Windows 11/NTFS and
-Ubuntu 26.04/ext4; public release remains pending.
+contract is available above. Release v0.1.0 is published for Windows 11/NTFS and
+Ubuntu 26.04/ext4. See the [release notes](docs/releases/v0.1.0.md) for the tested
+environments, checksums, operating instructions and limits.
 The M03 API uses one listener and UUIDv4-addressed registrations; the old
 per-registration ports are removed.
 
@@ -164,6 +169,9 @@ From a clean checkout, build the versioned candidates into a new or empty direct
 $candidateDir = Join-Path $env:TEMP ('localpost-candidate-' + [guid]::NewGuid())
 go run ./tools/release --version 0.1.0 --output $candidateDir
 ```
+
+Published releases are immutable. A fresh local build is not a replacement for
+the published v0.1.0 assets; changes require a new release version and qualification.
 
 The builder exports the identified Git commit, uses the pinned Go toolchain,
 and produces the two archives plus `SHA256SUMS`. Each archive includes its
